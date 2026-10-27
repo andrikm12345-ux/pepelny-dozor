@@ -52,7 +52,7 @@ export const TOWER_ORDER: TowerKind[] = ["archer", "ember", "frost", "ballista"]
 export const TOWERS: Record<TowerKind, TowerDef> = {
   archer: {
     kind: "archer",
-    name: "Дозорный лук",
+    name: "Лук Димона",
     blurb: "Быстрые стрелы по одной цели. Средняя дуга.",
     cost: 70,
     range: 2.55,

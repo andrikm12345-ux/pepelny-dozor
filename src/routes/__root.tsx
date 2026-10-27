@@ -3,7 +3,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "Пепельный Дозор";
+const APP_NAME = "Дозор Димона";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -14,7 +14,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Башенная оборона: удержите врата двенадцать волн, ставьте башни и улучшайте их за золото.",
+          "Башенная оборона Димона: удержите его врата двенадцать волн, ставьте башни и улучшайте их за золото.",
       },
       { name: "theme-color", content: "#0c100e" },
     ],

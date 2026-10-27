@@ -120,8 +120,8 @@ export function GameApp() {
     <div className="flex h-dvh select-none flex-col overflow-hidden bg-bg text-fg">
       <header className="flex shrink-0 items-center border-b border-line">
         <div className="shrink-0 px-3 py-2 sm:px-4">
-          <p className="text-xs tracking-[0.18em] text-muted uppercase">Ночная застава</p>
-          <h1 className="font-display text-xl leading-none text-gold sm:text-2xl">Пепельный Дозор</h1>
+          <p className="text-xs tracking-[0.18em] text-muted uppercase">Застава Димона</p>
+          <h1 className="font-display text-xl leading-none text-gold sm:text-2xl">Дозор Димона</h1>
         </div>
         <div className="flex min-w-0 flex-1 touch-pan-x items-center gap-1.5 overflow-x-auto overscroll-x-contain px-3 py-2 [scrollbar-width:none] sm:flex-none sm:justify-end sm:gap-2 sm:overflow-visible sm:px-4 [&::-webkit-scrollbar]:hidden">
           <Stat
@@ -157,7 +157,7 @@ export function GameApp() {
           <canvas
             ref={canvasRef}
             data-testid="battlefield"
-            aria-label="Поле боя. Тропа ведёт от портала слева к вратам."
+            aria-label="Поле боя Димона. Тропа ведёт от портала слева к его вратам."
             className="absolute inset-0 h-full w-full touch-none"
             onContextMenu={(event) => event.preventDefault()}
             onPointerLeave={() => sim.pointer(-1, -1, "leave")}
@@ -218,13 +218,13 @@ export function GameApp() {
                 ))}
               </ul>
               <p className="mt-2 text-xs leading-relaxed text-muted">
-                Клик по клетке ставит башню. Клик по башне — урон, скорострельность и продажа.
+                Клик по клетке ставит башню Димона. Клик по башне — урон, скорострельность и продажа.
               </p>
             </div>
           )}
 
           <div>
-            <p className="mb-2 text-xs tracking-[0.16em] text-muted uppercase">Арсенал</p>
+            <p className="mb-2 text-xs tracking-[0.16em] text-muted uppercase">Арсенал Димона</p>
             <div className="flex flex-col gap-2">
               {TOWER_ORDER.map((kind) => {
                 const def = TOWERS[kind];
@@ -427,17 +427,17 @@ function EndScreen({ hud, onStart, onRestart }: { hud: Hud; onStart: () => void;
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-bg/80 p-4">
       <div className="w-full max-w-md rounded-3xl border border-line bg-surface px-6 py-7 text-center shadow-2xl">
         <p className="text-xs tracking-[0.22em] text-muted uppercase">
-          {victory ? "Победа" : defeat ? "Поражение" : "Ночная застава"}
+          {victory ? "Победа Димона" : defeat ? "Поражение" : "Застава Димона"}
         </p>
         <h2 className="mt-2 font-display text-5xl leading-none text-gold">
-          {victory ? "Врата устояли" : defeat ? "Застава пала" : "Пепельный Дозор"}
+          {victory ? "Димон устоял" : defeat ? "Димон пал" : "Дозор Димона"}
         </h2>
         <p className="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-muted">
           {victory
-            ? `Двенадцать волн разбились о камень. Золота осталось ${hud.gold}. Убито ${hud.killed}.`
+            ? `Двенадцать волн разбились о камень Димона. Золота осталось ${hud.gold}. Убито ${hud.killed}.`
             : defeat
-              ? `Волна ${hud.wave} прорвала дозор. Убито ${hud.killed}, пропущено ${hud.leaked}.`
-              : "Пепел идёт по тропе к вратам. Ставьте башни на камень, копите золото с убийств и улучшайте урон со скорострельностью."}
+              ? `Волна ${hud.wave} прорвала дозор Димона. Убито ${hud.killed}, пропущено ${hud.leaked}.`
+              : "Пепел идёт по тропе к вратам Димона. Ставьте его башни на камень, копите золото с убийств и улучшайте урон со скорострельностью."}
         </p>
         {!victory && !defeat && (
           <ul className="mx-auto mt-4 max-w-sm space-y-1 text-left text-sm text-fg">
@@ -452,7 +452,7 @@ function EndScreen({ hud, onStart, onRestart }: { hud: Hud; onStart: () => void;
           onClick={victory || defeat ? onRestart : onStart}
           className="mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-gold px-5 text-base font-semibold text-bg"
         >
-          {victory || defeat ? "Сыграть снова" : "Заступить на пост"}
+          {victory || defeat ? "Сыграть снова" : "Встать за Димона"}
         </button>
         <p className="mt-3 text-xs text-muted">
           {START_LIVES} жизней · {hud.wavesTotal} волн

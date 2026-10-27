@@ -380,7 +380,7 @@ export function createSim(): Sim {
       if (lives <= 0) {
         phase = "defeat";
         paused = false;
-        banner = "Застава пала";
+        banner = "Димон пал";
         bannerT = 3;
         sfx("lose");
         save();
@@ -480,7 +480,7 @@ export function createSim(): Sim {
     combatLeft = 0;
     if (waveIndex >= WAVES.length - 1) {
       phase = "victory";
-      banner = "Врата устояли";
+      banner = "Димон устоял";
       bannerT = 4;
       wins += 1;
       sfx("win");
@@ -526,7 +526,7 @@ export function createSim(): Sim {
     world.hurt = 0;
     acc = 0;
     phase = "prep";
-    banner = "Поставьте башни вдоль тропы";
+    banner = "Башни Димона вдоль тропы";
     bannerT = 3.2;
   }
 
