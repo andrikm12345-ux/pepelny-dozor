@@ -118,12 +118,12 @@ export function GameApp() {
 
   return (
     <div className="flex h-dvh select-none flex-col overflow-hidden bg-bg text-fg">
-      <header className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2 sm:gap-3 sm:px-4">
-        <div className="min-w-0">
+      <header className="flex shrink-0 items-center border-b border-line">
+        <div className="shrink-0 px-3 py-2 sm:px-4">
           <p className="text-xs tracking-[0.18em] text-muted uppercase">Ночная застава</p>
-          <h1 className="truncate font-display text-xl leading-none text-gold sm:text-2xl">Пепельный Дозор</h1>
+          <h1 className="font-display text-xl leading-none text-gold sm:text-2xl">Пепельный Дозор</h1>
         </div>
-        <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+        <div className="flex min-w-0 flex-1 touch-pan-x items-center gap-1.5 overflow-x-auto overscroll-x-contain px-3 py-2 [scrollbar-width:none] sm:flex-none sm:justify-end sm:gap-2 sm:overflow-visible sm:px-4 [&::-webkit-scrollbar]:hidden">
           <Stat
             icon={Heart}
             label="Жизни"
@@ -284,7 +284,7 @@ function Stat({
 }) {
   return (
     <div
-      className="flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 sm:px-3"
+      className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 sm:px-3"
       aria-label={`${label}: ${value}`}
     >
       <Icon className={cx("size-4", tone)} aria-hidden="true" />
@@ -311,7 +311,7 @@ function IconButton({
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className="inline-flex size-11 items-center justify-center rounded-full border border-line bg-surface text-fg disabled:opacity-40"
+      className="inline-flex size-11 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-fg disabled:opacity-40"
     >
       {children}
     </button>
