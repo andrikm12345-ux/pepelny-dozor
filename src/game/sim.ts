@@ -20,6 +20,7 @@ import {
   type WaveEntry,
 } from "./balance";
 import { createAudio, type SfxName } from "./audio";
+import { dimonShout } from "./dimon";
 
 const SAVE_KEY = "pepelny-dozor-v1";
 
@@ -466,7 +467,7 @@ export function createSim(): Sim {
     combatLeft = queue.length;
     spawnGap = queue[0]?.gap ?? 0;
     phase = "combat";
-    banner = bonus > 0 ? `Волна ${waveIndex + 1} · +${bonus}` : `Волна ${waveIndex + 1}`;
+    banner = bonus > 0 ? `${dimonShout(waveIndex + 1)} · +${bonus}` : dimonShout(waveIndex + 1);
     bannerT = 2.2;
     sfx("wave");
     dirty = true;
@@ -490,7 +491,7 @@ export function createSim(): Sim {
       phase = "prep";
       prepLeft = PREP_SECONDS;
       prepShown = PREP_SECONDS;
-      banner = "Тропа чиста";
+      banner = "Димон выдохнул";
       bannerT = 2;
       save();
     }

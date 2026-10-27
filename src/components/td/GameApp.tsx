@@ -22,6 +22,7 @@ import {
   type TowerKind,
 } from "@/game/balance";
 import { boardLayout, render } from "@/game/draw";
+import { dimonNote } from "@/game/dimon";
 import { createSim, type Hud, type Sim } from "@/game/sim";
 
 const ICONS: Record<TowerKind, LucideIcon> = {
@@ -201,6 +202,7 @@ export function GameApp() {
         </div>
 
         <aside className="flex max-h-[46%] shrink-0 flex-col gap-3 overflow-y-auto border-t border-line bg-surface p-3 lg:max-h-none lg:h-full lg:w-80 lg:border-t-0 lg:border-l lg:p-4">
+          <DimonCard hud={hud} compact={Boolean(hud.selection)} />
           {hud.selection ? (
             <Inspector hud={hud} sim={sim} />
           ) : (
@@ -218,7 +220,7 @@ export function GameApp() {
                 ))}
               </ul>
               <p className="mt-2 text-xs leading-relaxed text-muted">
-                Клик по клетке ставит башню Димона. Клик по башне — урон, скорострельность и продажа.
+                Пустая клетка — башня Димона. Уже стоящая — урон, скорострельность и продажа.
               </p>
             </div>
           )}
@@ -268,6 +270,25 @@ export function GameApp() {
 
       {ended && <EndScreen hud={hud} onStart={sim.start} onRestart={sim.restart} />}
     </div>
+  );
+}
+
+function DimonCard({ hud, compact }: { hud: Hud; compact: boolean }) {
+  const note = dimonNote(hud.phase, hud.wave, hud.lives);
+  if (compact) {
+    return (
+      <p className="rounded-2xl border border-gold/30 bg-bg px-3 py-2 text-sm leading-snug text-fg">
+        <span className="mr-2 text-xs tracking-[0.16em] text-gold uppercase">Димон</span>
+        {note.title}
+      </p>
+    );
+  }
+  return (
+    <section className="rounded-2xl border border-gold/30 bg-bg px-3 py-3">
+      <p className="text-xs tracking-[0.16em] text-muted uppercase">Димон</p>
+      <h2 className="mt-1 font-display text-2xl leading-none text-gold">{note.title}</h2>
+      <p className="mt-2 text-sm leading-relaxed text-fg">{note.text}</p>
+    </section>
   );
 }
 
@@ -427,17 +448,17 @@ function EndScreen({ hud, onStart, onRestart }: { hud: Hud; onStart: () => void;
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-bg/80 p-4">
       <div className="w-full max-w-md rounded-3xl border border-line bg-surface px-6 py-7 text-center shadow-2xl">
         <p className="text-xs tracking-[0.22em] text-muted uppercase">
-          {victory ? "Победа Димона" : defeat ? "Поражение" : "Застава Димона"}
+          {victory ? "Смена сдана" : defeat ? "Дыра в воротах" : "Хозяин врат"}
         </p>
         <h2 className="mt-2 font-display text-5xl leading-none text-gold">
           {victory ? "Димон устоял" : defeat ? "Димон пал" : "Дозор Димона"}
         </h2>
         <p className="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-muted">
           {victory
-            ? `Двенадцать волн разбились о камень Димона. Золота осталось ${hud.gold}. Убито ${hud.killed}.`
+            ? `Ночь кончилась на Димоне. Золота осталось ${hud.gold}. Убито ${hud.killed}.`
             : defeat
-              ? `Волна ${hud.wave} прорвала дозор Димона. Убито ${hud.killed}, пропущено ${hud.leaked}.`
-              : "Пепел идёт по тропе к вратам Димона. Ставьте его башни на камень, копите золото с убийств и улучшайте урон со скорострельностью."}
+              ? `Волна ${hud.wave} дошла до врат. Димон это запомнил. Убито ${hud.killed}, пропущено ${hud.leaked}.`
+              : "Димон стережёт пепельную тропу. Его золото капает с убитых. Башни ставь на камень, не на дорогу, и улучшай урон со скорострельностью."}
         </p>
         {!victory && !defeat && (
           <ul className="mx-auto mt-4 max-w-sm space-y-1 text-left text-sm text-fg">

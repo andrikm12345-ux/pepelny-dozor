@@ -53,7 +53,7 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
   archer: {
     kind: "archer",
     name: "Лук Димона",
-    blurb: "Быстрые стрелы по одной цели. Средняя дуга.",
+    blurb: "Лук Димона. Бьёт одну тварь и бьёт часто. Его любимая башня на углу.",
     cost: 70,
     range: 2.55,
     damage: 12,
@@ -68,8 +68,8 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
   },
   ember: {
     kind: "ember",
-    name: "Жар-башня",
-    blurb: "Медленный залп по площади. Летунов не берёт.",
+    name: "Костёр Димона",
+    blurb: "Жар по площади. Летунов не достаёт: Димон проверял и обжёг бровь.",
     cost: 155,
     range: 2.35,
     damage: 26,
@@ -84,8 +84,8 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
   },
   frost: {
     kind: "frost",
-    name: "Морозный фонарь",
-    blurb: "Слабый урон, но надолго сковывает шаг.",
+    name: "Фонарь Димона",
+    blurb: "Слабый удар, зато вяжет шаг. Димон ставит его на шустрых.",
     cost: 110,
     range: 2.15,
     damage: 6,
@@ -100,8 +100,8 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
   },
   ballista: {
     kind: "ballista",
-    name: "Баллиста",
-    blurb: "Дальний выстрел. Пробивает броню латников.",
+    name: "Баллиста Димона",
+    blurb: "Дальний болт. Единственное, чем Димон прошивает броню латников.",
     cost: 200,
     range: 3.55,
     damage: 62,
@@ -120,7 +120,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   mite: {
     kind: "mite",
     name: "Уголёк",
-    tag: "",
+    tag: "мелочь",
     hp: 46,
     speed: 1.22,
     gold: 5,
@@ -132,7 +132,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   runner: {
     kind: "runner",
     name: "Бегун",
-    tag: "быстрый",
+    tag: "шустрый",
     hp: 38,
     speed: 2.35,
     gold: 7,
@@ -144,7 +144,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   husk: {
     kind: "husk",
     name: "Латник",
-    tag: "броня",
+    tag: "железо",
     hp: 320,
     speed: 0.72,
     gold: 14,
@@ -156,7 +156,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   wisp: {
     kind: "wisp",
     name: "Огонёк",
-    tag: "лёт",
+    tag: "летун",
     hp: 70,
     speed: 1.7,
     gold: 8,
@@ -168,7 +168,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   boss: {
     kind: "boss",
     name: "Таран",
-    tag: "босс",
+    tag: "за Димоном",
     hp: 3200,
     speed: 0.55,
     gold: 80,
