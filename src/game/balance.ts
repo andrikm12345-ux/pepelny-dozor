@@ -1,7 +1,7 @@
 export const COLS = 18;
 export const ROWS = 11;
 
-export const START_GOLD = 180;
+export const START_GOLD = 220;
 export const START_LIVES = 18;
 export const PREP_SECONDS = 8;
 export const SELL_RATIO = 0.6;
@@ -65,7 +65,7 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
     cost: 70,
     range: 2.55,
     damage: 12,
-    rate: 1.25,
+    rate: 1.2,
     shotSpeed: 9,
     splash: 0,
     slow: 0,
@@ -134,7 +134,7 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
     kind: "tesla",
     name: "Молния Димона",
     blurb: "Бьёт тварь и перескакивает по соседним. Лучшая против плотной толпы.",
-    cost: 175,
+    cost: 190,
     range: 2.3,
     damage: 20,
     rate: 0.9,
@@ -174,7 +174,7 @@ export const BANNER_RATE = 0.2;
 export const BANNER_MAX = 2;
 
 /** Молния: затухание урона на каждый прыжок и дальность прыжка в клетках. */
-export const CHAIN_FALLOFF = 0.8;
+export const CHAIN_FALLOFF = 0.75;
 export const CHAIN_REACH = 1.5;
 
 /** Лекарь: как часто лечит, радиус и доля здоровья за один импульс. */
@@ -186,15 +186,15 @@ export const HEAL_FRACTION = 0.03;
 export const ABILITY_COOLDOWN = 24;
 export const ABILITY_RADIUS = 1.7;
 export const ABILITY_DELAY = 0.45;
-export const ABILITY_BASE = 90;
-export const ABILITY_PER_WAVE = 28;
+export const ABILITY_BASE = 70;
+export const ABILITY_PER_WAVE = 22;
 
 export function abilityDamage(waveIndex: number): number {
   return ABILITY_BASE + ABILITY_PER_WAVE * waveIndex;
 }
 
 /** Заморозка Димона: все твари на поле встают, а потом ещё немного получают лишний урон. */
-export const FREEZE_COOLDOWN = 40;
+export const FREEZE_COOLDOWN = 50;
 export const FREEZE_TIME = 2.2;
 export const FREEZE_BOSS = 0.5;
 export const FREEZE_BRITTLE = 0.2;
@@ -492,18 +492,18 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
 };
 
 export const WAVES: SpawnGroup[][] = [
-  [{ kind: "mite", count: 10, interval: 0.75 }],
+  [{ kind: "mite", count: 8, interval: 0.8 }],
   [
-    { kind: "mite", count: 8, interval: 0.5 },
-    { kind: "runner", count: 6, interval: 0.42 },
+    { kind: "mite", count: 7, interval: 0.55 },
+    { kind: "runner", count: 4, interval: 0.48 },
   ],
   [
-    { kind: "runner", count: 8, interval: 0.36 },
-    { kind: "mite", count: 10, interval: 0.4 },
+    { kind: "runner", count: 6, interval: 0.4 },
+    { kind: "mite", count: 8, interval: 0.45 },
   ],
   [
-    { kind: "husk", count: 5, interval: 1.05 },
-    { kind: "mite", count: 8, interval: 0.4 },
+    { kind: "husk", count: 4, interval: 1.1 },
+    { kind: "mite", count: 7, interval: 0.45 },
   ],
   [
     { kind: "runner", count: 10, interval: 0.32 },
@@ -582,6 +582,8 @@ export interface MapDef {
   routes: Corners[];
   /** Прибавка к стартовому золоту. */
   gold: number;
+  /** Во сколько раз твари на этой карте толще: длинная тропа даёт больше времени под огнём. */
+  hp: number;
 }
 
 export interface Waypoint {
@@ -619,6 +621,7 @@ export const MAPS: Record<MapId, MapDef> = {
       ],
     ],
     gold: 0,
+    hp: 1.1,
   },
   serpent: {
     id: "serpent",
@@ -639,6 +642,7 @@ export const MAPS: Record<MapId, MapDef> = {
       ],
     ],
     gold: 0,
+    hp: 2.1,
   },
   descent: {
     id: "descent",
@@ -653,6 +657,7 @@ export const MAPS: Record<MapId, MapDef> = {
       ],
     ],
     gold: 250,
+    hp: 1.05,
   },
   twin: {
     id: "twin",
@@ -677,6 +682,7 @@ export const MAPS: Record<MapId, MapDef> = {
       ],
     ],
     gold: 250,
+    hp: 0.9,
   },
 };
 
@@ -807,9 +813,9 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
     id: "hard",
     label: "Димон не спит",
     blurb: "Мало жизней, твари толще. Каждая башня на счету.",
-    gold: 200,
-    lives: 12,
-    hp: 1.2,
+    gold: 190,
+    lives: 10,
+    hp: 1.25,
   },
 };
 
@@ -850,12 +856,28 @@ export interface WaveScale {
  */
 export function waveScale(index: number): WaveScale {
   const k = endlessStep(index);
-  if (k === 0) return { hp: 1, speed: 1, gold: 1 };
+  const base = campaignHp(Math.min(index, WAVES.length - 1));
+  if (k === 0) return { hp: base, speed: 1, gold: 1 };
   return {
-    hp: Math.pow(1.3, k) * (1 + 0.08 * k),
+    hp: base * Math.pow(ENDLESS_GROWTH, k) * (1 + 0.08 * k),
     speed: Math.min(1.5, 1 + 0.025 * k),
     gold: 1 + 0.03 * k,
   };
+}
+
+/** Здоровье в обычных волнах: первые четыре по таблице, дальше растёт на CAMPAIGN_RAMP за волну. */
+export const CAMPAIGN_RAMP = 0.2;
+/** Во сколько раз крепчают твари за каждую волну бесконечной ночи (поверх линейной добавки). */
+export const ENDLESS_GROWTH = 1.17;
+
+/** Множитель карты вступает в силу постепенно: первые волны на всех картах одинаковые. */
+export function mapHp(factor: number, index: number): number {
+  const t = Math.min(1, Math.max(0, (index - 2) / 6));
+  return 1 + (factor - 1) * t;
+}
+
+export function campaignHp(index: number): number {
+  return 1 + CAMPAIGN_RAMP * Math.max(0, index - 3);
 }
 
 /** Состав волны: из таблицы или сгенерированный для бесконечной ночи. */

@@ -29,6 +29,7 @@ import {
   WAVES,
   abilityDamage,
   gateOf,
+  mapHp,
   getMap,
   isInside,
   isRoad,
@@ -894,7 +895,7 @@ export function createSim(): Sim {
   function makeCreep(kind: EnemyKind, route: number, x: number, y: number, goldShare = 1): Creep {
     const def = ENEMIES[kind];
     const scale = waveScale(waveIndex);
-    const hp = Math.round(def.hp * DIFFICULTIES[runDifficulty].hp * scale.hp * bonus.hp);
+    const hp = Math.round(def.hp * DIFFICULTIES[runDifficulty].hp * mapHp(MAPS[runMap].hp, waveIndex) * scale.hp * bonus.hp);
     return {
       id: nextId++,
       kind,

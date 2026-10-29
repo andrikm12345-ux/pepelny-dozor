@@ -18,7 +18,9 @@
     "check:auth": "node scripts/check-auth-invariant.mjs",
     "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "balance": "rolldown tools/balance/matrix.ts -o node_modules/.cache/balance/matrix.mjs -f esm --platform node && node node_modules/.cache/balance/matrix.mjs",
+    "check:mechanics": "rolldown tools/balance/mastery.check.ts -o node_modules/.cache/balance/mastery.mjs -f esm --platform node && node node_modules/.cache/balance/mastery.mjs && rolldown tools/balance/events.check.ts -o node_modules/.cache/balance/events.mjs -f esm --platform node && node node_modules/.cache/balance/events.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
