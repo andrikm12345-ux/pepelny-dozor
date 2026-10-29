@@ -7,7 +7,7 @@ export function dimonNote(
   if (phase === "victory") {
     return {
       title: "Смена сдана",
-      text: "Двенадцать волн разбились о камень. Димон пересчитывает золото и идёт спать у врат.",
+      text: "Двенадцать волн разбились о камень. Можно идти спать, а можно остаться: за тропой уже гудит бесконечная ночь.",
     };
   }
   if (phase === "defeat") {
@@ -28,13 +28,51 @@ export function dimonNote(
       text: "Жизней почти не осталось. Димон ещё на стене, но уже не шутит. Закрой дыру, не копи.",
     };
   }
+  if (wave > WAVE_NOTES.length) {
+    return ENDLESS_NOTES[(wave - WAVE_NOTES.length - 1) % ENDLESS_NOTES.length]!;
+  }
   const note = WAVE_NOTES[Math.min(Math.max(wave, 1), WAVE_NOTES.length) - 1]!;
   return note;
 }
 
 export function dimonShout(wave: number): string {
+  if (wave > SHOUTS.length) {
+    return ENDLESS_SHOUTS[(wave - SHOUTS.length - 1) % ENDLESS_SHOUTS.length]!;
+  }
   return SHOUTS[Math.min(Math.max(wave, 1), SHOUTS.length) - 1] ?? "Держи тропу";
 }
+
+const ENDLESS_NOTES: Array<{ title: string; text: string }> = [
+  {
+    title: "Ночь не кончилась",
+    text: "Димон думал, что Таран был последним. Нет. Из портала лезут ещё, и каждая волна толще прошлой.",
+  },
+  {
+    title: "Толще и злее",
+    text: "Твари крепнут быстрее, чем капает золото. Димон считает не деньги, а сколько волн продержится стена.",
+  },
+  {
+    title: "Снова Таран",
+    text: "Каждая третья волна ведёт таранов. Баллисты Димона должны быть прокачаны до упора.",
+  },
+  {
+    title: "Без передышки",
+    text: "Продай то, что стреляет мимо, и поставь туда баллисту. Здесь лишних башен не бывает.",
+  },
+  {
+    title: "Рекорд",
+    text: "Димон уже не надеется выстоять. Он хочет, чтобы утром у врат нашли цифру побольше.",
+  },
+];
+
+const ENDLESS_SHOUTS = [
+  "Ночь не кончилась.",
+  "Они стали толще.",
+  "Ещё тараны.",
+  "Не отдавай углы.",
+  "Стена трещит.",
+  "Держи, сколько сможешь.",
+];
 
 const WAVE_NOTES: Array<{ title: string; text: string }> = [
   {

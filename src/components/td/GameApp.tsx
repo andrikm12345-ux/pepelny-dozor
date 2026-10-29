@@ -146,7 +146,13 @@ export function GameApp() {
           <Stat
             icon={Crosshair}
             label="Волна"
-            value={hud.phase === "menu" ? `0/${hud.wavesTotal}` : `${Math.min(hud.wave, hud.wavesTotal)}/${hud.wavesTotal}`}
+            value={
+              hud.phase === "menu"
+                ? `0/${hud.wavesTotal}`
+                : hud.endless
+                  ? `${hud.wave}/∞`
+                  : `${Math.min(hud.wave, hud.wavesTotal)}/${hud.wavesTotal}`
+            }
             tone="text-fg"
           />
           <IconButton label="Сыграть заново" onClick={sim.restart} disabled={hud.phase === "menu"}>
@@ -305,6 +311,7 @@ export function GameApp() {
           hud={hud}
           onStart={sim.start}
           onRestart={sim.restart}
+          onEndless={sim.continueEndless}
           onDifficulty={sim.setDifficulty}
         />
       )}
@@ -585,11 +592,13 @@ function EndScreen({
   hud,
   onStart,
   onRestart,
+  onEndless,
   onDifficulty,
 }: {
   hud: Hud;
   onStart: () => void;
   onRestart: () => void;
+  onEndless: () => void;
   onDifficulty: (difficulty: Difficulty) => void;
 }) {
   const victory = hud.phase === "victory";
@@ -605,9 +614,11 @@ function EndScreen({
         </h2>
         <p className="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-muted">
           {victory
-            ? `Ночь кончилась на Димоне. Золота осталось ${hud.gold}. Убито ${hud.killed}.`
-            : defeat
-              ? `Волна ${hud.wave} дошла до врат. Димон это запомнил. Убито ${hud.killed}, пропущено ${hud.leaked}.`
+            ? `Двенадцать волн разбились о Димона. Убито ${hud.killed}. Дальше — бесконечная ночь: каждая волна толще прошлой, конец один, вопрос — когда.`
+            : defeat && hud.endless
+              ? `Бесконечная ночь взяла своё на волне ${hud.wave}. Димон продержался ${hud.cleared} волн. Убито ${hud.killed}.`
+              : defeat
+                ? `Волна ${hud.wave} дошла до врат. Димон это запомнил. Убито ${hud.killed}, пропущено ${hud.leaked}.`
               : "Димон стережёт пепельную тропу. Его золото капает с убитых. Башни ставь на камень, не на дорогу, и улучшай урон со скорострельностью."}
         </p>
         {!victory && !defeat && (
@@ -639,11 +650,24 @@ function EndScreen({
           </div>
           <p className="mt-1.5 text-xs text-muted">{DIFFICULTIES[hud.difficulty].blurb}</p>
         </div>
+        {victory && (
+          <button
+            type="button"
+            data-testid="endless"
+            onClick={onEndless}
+            className="mt-5 inline-flex min-h-12 w-full animate-call-glow items-center justify-center rounded-full bg-ember px-5 text-base font-semibold text-fg"
+          >
+            Дальше — бесконечная ночь
+          </button>
+        )}
         <button
           type="button"
           data-testid="restart"
           onClick={victory || defeat ? onRestart : onStart}
-          className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-gold px-5 text-base font-semibold text-bg"
+          className={cx(
+            "inline-flex min-h-12 w-full items-center justify-center rounded-full px-5 text-base font-semibold",
+            victory ? "mt-2 border border-line bg-bg text-fg" : "mt-5 bg-gold text-bg",
+          )}
         >
           {victory || defeat ? "Сыграть снова" : "Встать за Димона"}
         </button>

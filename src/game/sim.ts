@@ -13,6 +13,8 @@ import {
   rateMult,
   upgradeCost,
   wavePreview,
+  waveScale,
+  waveSpec,
   type Difficulty,
   type EnemyKind,
   type TargetMode,
@@ -200,6 +202,8 @@ export interface Hud {
   livesTotal: number;
   /** Чит: золото не тратится. */
   cheat: boolean;
+  /** Идёт бесконечная ночь после 12-й волны. */
+  endless: boolean;
   paused: boolean;
   speed: 1 | 2;
   muted: boolean;
@@ -220,6 +224,7 @@ export interface Sim {
   loadProgress(): void;
   start(): void;
   restart(): void;
+  continueEndless(): void;
   setDifficulty(difficulty: Difficulty): void;
   togglePause(): void;
   toggleSpeed(): void;
@@ -253,6 +258,8 @@ export function createSim(): Sim {
   let nextId = 1;
   let phase: Phase = "menu";
   let difficulty: Difficulty = "normal";
+  /** Сложность идущего забега; выбор в меню действует со следующей игры. */
+  let runDifficulty: Difficulty = difficulty;
   let gold = DIFFICULTIES[difficulty].gold;
   let lives = DIFFICULTIES[difficulty].lives;
   let waveIndex = 0;
@@ -267,6 +274,7 @@ export function createSim(): Sim {
   let cheat = false;
   /** Чит включали в этом забеге — рекорды не пишем. */
   let cheated = false;
+  let endless = false;
   let build: TowerKind | null = null;
   let selectedId = 0;
   let banner = "";
@@ -338,12 +346,13 @@ export function createSim(): Sim {
       difficulty,
       livesTotal: DIFFICULTIES[difficulty].lives,
       cheat,
+      endless,
       paused,
       speed,
       muted,
       build,
       selection,
-      nextGroups: phase === "victory" ? [] : wavePreview(waveIndex),
+      nextGroups: wavePreview(phase === "victory" ? waveIndex + 1 : waveIndex),
       banner: bannerT > 0 ? banner : "",
       combatLeft,
       combatTotal,
@@ -386,7 +395,7 @@ export function createSim(): Sim {
 
   function noteBest() {
     if (cheated) return;
-    if (cleared > best[difficulty]) best[difficulty] = cleared;
+    if (cleared > best[runDifficulty]) best[runDifficulty] = cleared;
   }
 
   function save() {
@@ -534,7 +543,8 @@ export function createSim(): Sim {
 
   function spawn(kind: EnemyKind) {
     const def = ENEMIES[kind];
-    const hp = Math.round(def.hp * DIFFICULTIES[difficulty].hp);
+    const scale = waveScale(waveIndex);
+    const hp = Math.round(def.hp * DIFFICULTIES[runDifficulty].hp * scale.hp);
     const origin = WAYPOINTS[0]!;
     const next = WAYPOINTS[1] ?? origin;
     const ang = Math.atan2(next.y - origin.y, next.x - origin.x);
@@ -548,8 +558,8 @@ export function createSim(): Sim {
       travel: 0,
       hp,
       maxHp: hp,
-      speed: def.speed,
-      gold: def.gold,
+      speed: def.speed * scale.speed,
+      gold: Math.round(def.gold * scale.gold),
       armor: def.armor,
       flying: def.flying,
       scale: def.scale,
@@ -574,8 +584,7 @@ export function createSim(): Sim {
   }
 
   function beginWave(immediate: boolean, bonus = 0) {
-    const spec = WAVES[waveIndex];
-    if (!spec) return;
+    const spec = waveSpec(waveIndex);
     queue = [];
     let first = true;
     for (const group of spec) {
@@ -600,11 +609,11 @@ export function createSim(): Sim {
     noteBest();
     queue = [];
     combatLeft = 0;
-    if (waveIndex >= WAVES.length - 1) {
+    if (!endless && waveIndex >= WAVES.length - 1) {
       phase = "victory";
       banner = "Димон устоял";
       bannerT = 4;
-      if (!cheated) winsBy[difficulty] += 1;
+      if (!cheated) winsBy[runDifficulty] += 1;
       sfx("win");
       save();
     } else {
@@ -628,6 +637,7 @@ export function createSim(): Sim {
     world.rings = [];
     world.decals = [];
     world.flashes = [];
+    runDifficulty = difficulty;
     occ.clear();
     byId.clear();
     queue = [];
@@ -651,6 +661,7 @@ export function createSim(): Sim {
     world.hurt = 0;
     acc = 0;
     cheated = cheat;
+    endless = false;
     phase = "prep";
     banner = "Башни Димона вдоль тропы";
     bannerT = 3.2;
@@ -997,6 +1008,18 @@ export function createSim(): Sim {
         lives = DIFFICULTIES[difficulty].lives;
       }
       persist();
+      flush();
+    },
+    continueEndless() {
+      if (phase !== "victory") return;
+      audio.unlock();
+      endless = true;
+      waveIndex += 1;
+      phase = "prep";
+      prepLeft = PREP_SECONDS;
+      prepShown = PREP_SECONDS;
+      banner = "Ночь не кончилась";
+      bannerT = 3;
       flush();
     },
     togglePause() {

@@ -316,8 +316,7 @@ export interface WaveEntry {
 }
 
 export function wavePreview(index: number): WaveEntry[] {
-  const wave = WAVES[index];
-  if (!wave) return [];
+  const wave = waveSpec(index);
   const map = new Map<EnemyKind, number>();
   for (const group of wave) map.set(group.kind, (map.get(group.kind) ?? 0) + group.count);
   return [...map.entries()].map(([kind, count]) => ({
@@ -382,4 +381,46 @@ export function towerTraits(def: TowerDef): TowerTrait[] {
   if (def.pierce) traits.push({ label: "пробивает броню" });
   else traits.push({ label: "броня гасит урон", bad: true });
   return traits;
+}
+
+/** Номер «бесконечной» волны: 1 для 13-й, 2 для 14-й и т. д. 0 — обычные волны. */
+export function endlessStep(index: number): number {
+  return Math.max(0, index - (WAVES.length - 1));
+}
+
+export interface WaveScale {
+  hp: number;
+  speed: number;
+  gold: number;
+}
+
+/**
+ * Множители тварей. До 12-й волны всё по таблице; дальше здоровье растёт
+ * по экспоненте, а золото — линейно, так что ночь рано или поздно побеждает.
+ */
+export function waveScale(index: number): WaveScale {
+  const k = endlessStep(index);
+  if (k === 0) return { hp: 1, speed: 1, gold: 1 };
+  return {
+    hp: Math.pow(1.3, k) * (1 + 0.08 * k),
+    speed: Math.min(1.5, 1 + 0.025 * k),
+    gold: 1 + 0.03 * k,
+  };
+}
+
+/** Состав волны: из таблицы или сгенерированный для бесконечной ночи. */
+export function waveSpec(index: number): SpawnGroup[] {
+  const fixed = WAVES[index];
+  if (fixed) return fixed;
+  const k = endlessStep(index);
+  const gap = (base: number) => Math.max(0.1, base * Math.pow(0.97, k));
+  const groups: SpawnGroup[] = [];
+  const mix = k % 4;
+  if (mix === 0) groups.push({ kind: "mite", count: 14 + 3 * k, interval: gap(0.2) });
+  groups.push({ kind: "runner", count: 12 + 2 * k, interval: gap(0.22) });
+  groups.push({ kind: "husk", count: 6 + k, interval: gap(0.6) });
+  if (mix !== 1) groups.push({ kind: "wisp", count: 8 + k, interval: gap(0.24) });
+  if (k % 3 === 0) groups.push({ kind: "boss", count: Math.ceil(k / 6), interval: 1.6 });
+  if (mix === 2) groups.push({ kind: "husk", count: 3 + Math.floor(k / 2), interval: gap(0.5) });
+  return groups;
 }
