@@ -17,6 +17,8 @@ import {
 import {
   DIFFICULTIES,
   DIFFICULTY_ORDER,
+  MAP_ORDER,
+  MAPS,
   MAX_RANK,
   PREP_SECONDS,
   TARGETS,
@@ -24,6 +26,7 @@ import {
   TOWERS,
   towerTraits,
   type Difficulty,
+  type MapId,
   type TowerDef,
   type TowerKind,
 } from "@/game/balance";
@@ -182,7 +185,7 @@ export function GameApp() {
           <canvas
             ref={canvasRef}
             data-testid="battlefield"
-            aria-label="Поле боя Димона. Тропа ведёт от портала слева к его вратам."
+            aria-label={`Поле боя Димона, карта «${MAPS[hud.mapId].name}». Тропа ведёт от портала слева к его вратам.`}
             className="absolute inset-0 h-full w-full touch-none"
             onContextMenu={(event) => event.preventDefault()}
             onPointerLeave={() => sim.pointer(-1, -1, "leave")}
@@ -313,6 +316,7 @@ export function GameApp() {
           onRestart={sim.restart}
           onEndless={sim.continueEndless}
           onDifficulty={sim.setDifficulty}
+          onMap={sim.setMap}
         />
       )}
     </div>
@@ -588,24 +592,80 @@ function Upgrade({
   );
 }
 
+/** Карточка карты: мини-схема троп, название и рекорд при выбранной сложности. */
+function MapCard({
+  id,
+  selected,
+  best,
+  onSelect,
+}: {
+  id: MapId;
+  selected: boolean;
+  best: number;
+  onSelect: () => void;
+}) {
+  const def = MAPS[id];
+  const toPoints = (corners: Array<[number, number]>) => corners.map(([c, r]) => `${c + 0.5},${r + 0.5}`).join(" ");
+  const gate = def.routes[0]![def.routes[0]!.length - 1]!;
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      data-testid={`map-${id}`}
+      onClick={onSelect}
+      className={cx(
+        "flex flex-col items-stretch gap-1 rounded-xl border p-1.5 text-left",
+        selected ? "border-gold bg-surface-2" : "border-line bg-bg",
+      )}
+    >
+      <svg viewBox="0 0 18 11" className="w-full rounded-md bg-[#141c18]" aria-hidden="true">
+        {def.routes.map((corners, index) => (
+          <polyline
+            key={index}
+            points={toPoints(corners)}
+            fill="none"
+            stroke={selected ? "var(--color-gold)" : "#6b5444"}
+            strokeWidth="0.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ))}
+        {def.routes.map((corners, index) => (
+          <circle key={index} cx={corners[0]![0] + 0.5} cy={corners[0]![1] + 0.5} r="0.55" fill="var(--color-ember)" />
+        ))}
+        <rect x={gate[0] + 0.1} y={gate[1] + 0.1} width="0.8" height="0.8" rx="0.2" fill="var(--color-gold)" />
+      </svg>
+      <span className={cx("px-0.5 text-xs leading-tight font-semibold", selected ? "text-gold" : "text-fg")}>
+        {def.name}
+      </span>
+      <span className="px-0.5 text-[11px] leading-none tabular-nums text-muted">
+        {best > 0 ? `рекорд: волна ${best}` : "без рекорда"}
+      </span>
+    </button>
+  );
+}
+
 function EndScreen({
   hud,
   onStart,
   onRestart,
   onEndless,
   onDifficulty,
+  onMap,
 }: {
   hud: Hud;
   onStart: () => void;
   onRestart: () => void;
   onEndless: () => void;
   onDifficulty: (difficulty: Difficulty) => void;
+  onMap: (id: MapId) => void;
 }) {
   const victory = hud.phase === "victory";
   const defeat = hud.phase === "defeat";
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-bg/80 p-4">
-      <div className="w-full max-w-md rounded-3xl border border-line bg-surface px-6 py-7 text-center shadow-2xl">
+    <div className="fixed inset-0 z-30 flex overflow-y-auto bg-bg/80 p-4">
+      <div className="m-auto w-full max-w-md rounded-3xl border border-line bg-surface px-5 py-6 text-center shadow-2xl sm:px-6 sm:py-7">
         <p className="text-xs tracking-[0.22em] text-muted uppercase">
           {victory ? "Смена сдана" : defeat ? "Дыра в воротах" : "Хозяин врат"}
         </p>
@@ -629,6 +689,21 @@ function EndScreen({
           </ul>
         )}
         <div className="mt-5">
+          <p className="mb-1.5 text-xs tracking-[0.16em] text-muted uppercase">Карта</p>
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="radiogroup" aria-label="Карта">
+            {MAP_ORDER.map((id) => (
+              <MapCard
+                key={id}
+                id={id}
+                selected={hud.mapId === id}
+                best={hud.mapBest[id]}
+                onSelect={() => onMap(id)}
+              />
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-muted">{MAPS[hud.mapId].blurb}</p>
+        </div>
+        <div className="mt-4">
           <p className="mb-1.5 text-xs tracking-[0.16em] text-muted uppercase">Сложность</p>
           <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="Сложность">
             {DIFFICULTY_ORDER.map((id) => (
@@ -672,7 +747,7 @@ function EndScreen({
           {victory || defeat ? "Сыграть снова" : "Встать за Димона"}
         </button>
         <p className="mt-3 text-xs text-muted">
-          {hud.livesTotal} жизней · {DIFFICULTIES[hud.difficulty].gold} золота · {hud.wavesTotal} волн
+          {MAPS[hud.mapId].name} · {hud.livesTotal} жизней · {hud.goldTotal} золота · {hud.wavesTotal} волн
           {hud.bestWave > 0 ? ` · лучшая волна ${hud.bestWave}` : ""}
           {hud.wins > 0 ? ` · побед ${hud.wins}` : ""}
         </p>

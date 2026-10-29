@@ -5,9 +5,12 @@ import {
   PREP_SECONDS,
   SELL_RATIO,
   TOWERS,
+  MAPS,
+  MAP_ORDER,
   WAVES,
-  WAYPOINTS,
   dmgMult,
+  gateOf,
+  getMap,
   isInside,
   isRoad,
   rateMult,
@@ -17,6 +20,8 @@ import {
   waveSpec,
   type Difficulty,
   type EnemyKind,
+  type GameMap,
+  type MapId,
   type TargetMode,
   type TowerKind,
   type WaveEntry,
@@ -26,9 +31,14 @@ import { createAudio, type SfxName } from "./audio";
 const SAVE_KEY = "pepelny-dozor-v1";
 
 type PerDifficulty = Record<Difficulty, number>;
+type PerMap = Record<MapId, PerDifficulty>;
 
 function perDifficulty(): PerDifficulty {
   return { easy: 0, normal: 0, hard: 0 };
+}
+
+function perMap(): PerMap {
+  return Object.fromEntries(MAP_ORDER.map((id) => [id, perDifficulty()])) as PerMap;
 }
 
 function readPer(value: unknown): PerDifficulty {
@@ -41,6 +51,13 @@ function readPer(value: unknown): PerDifficulty {
   return out;
 }
 
+function readPerMap(value: unknown): PerMap {
+  const out = perMap();
+  if (!value || typeof value !== "object") return out;
+  for (const id of MAP_ORDER) out[id] = readPer((value as Record<string, unknown>)[id]);
+  return out;
+}
+
 export type Phase = "menu" | "prep" | "combat" | "victory" | "defeat";
 
 export interface Creep {
@@ -48,6 +65,8 @@ export interface Creep {
   kind: EnemyKind;
   x: number;
   y: number;
+  /** Номер тропы на карте с несколькими порталами. */
+  route: number;
   wpi: number;
   travel: number;
   hp: number;
@@ -160,6 +179,7 @@ export interface World {
   rings: Ring[];
   decals: Decal[];
   flashes: Flash[];
+  map: GameMap;
   hoverCol: number;
   hoverRow: number;
   build: TowerKind | null;
@@ -200,6 +220,11 @@ export interface Hud {
   wins: number;
   difficulty: Difficulty;
   livesTotal: number;
+  /** Стартовое золото выбранных карты и сложности. */
+  goldTotal: number;
+  mapId: MapId;
+  /** Лучшая волна на каждой карте при выбранной сложности. */
+  mapBest: Record<MapId, number>;
   /** Чит: золото не тратится. */
   cheat: boolean;
   /** Идёт бесконечная ночь после 12-й волны. */
@@ -226,6 +251,7 @@ export interface Sim {
   restart(): void;
   continueEndless(): void;
   setDifficulty(difficulty: Difficulty): void;
+  setMap(id: MapId): void;
   togglePause(): void;
   toggleSpeed(): void;
   toggleMute(): void;
@@ -260,14 +286,18 @@ export function createSim(): Sim {
   let difficulty: Difficulty = "normal";
   /** Сложность идущего забега; выбор в меню действует со следующей игры. */
   let runDifficulty: Difficulty = difficulty;
-  let gold = DIFFICULTIES[difficulty].gold;
+  let mapId: MapId = "ash";
+  /** Карта идущего забега; выбор после боя действует со следующей игры. */
+  let runMap: MapId = mapId;
+  let gold = startGold();
   let lives = DIFFICULTIES[difficulty].lives;
   let waveIndex = 0;
   let cleared = 0;
   let killed = 0;
   let leaked = 0;
-  let best = perDifficulty();
-  let winsBy = perDifficulty();
+  let best = perMap();
+  let winsBy = perMap();
+  let spawnCount = 0;
   let paused = false;
   let speed: 1 | 2 = 1;
   let muted = false;
@@ -298,6 +328,7 @@ export function createSim(): Sim {
     rings: [],
     decals: [],
     flashes: [],
+    map: getMap(mapId),
     hoverCol: -1,
     hoverRow: -1,
     build: null,
@@ -341,10 +372,13 @@ export function createSim(): Sim {
       killed,
       leaked,
       cleared,
-      bestWave: best[difficulty],
-      wins: winsBy[difficulty],
+      bestWave: best[mapId][difficulty],
+      wins: winsBy[mapId][difficulty],
       difficulty,
       livesTotal: DIFFICULTIES[difficulty].lives,
+      goldTotal: startGold(),
+      mapId,
+      mapBest: Object.fromEntries(MAP_ORDER.map((id) => [id, best[id][difficulty]])) as Record<MapId, number>,
       cheat,
       endless,
       paused,
@@ -393,9 +427,22 @@ export function createSim(): Sim {
     if (!cheat) gold -= cost;
   }
 
+  /** Стартовое золото выбранной сложности и карты. */
+  function startGold() {
+    return DIFFICULTIES[difficulty].gold + MAPS[mapId].gold;
+  }
+
+  /** Показать выбранную карту на пустом поле (только в меню). */
+  function previewMap() {
+    world.map = getMap(mapId);
+    gold = startGold();
+    lives = DIFFICULTIES[difficulty].lives;
+  }
+
   function noteBest() {
     if (cheated) return;
-    if (cleared > best[runDifficulty]) best[runDifficulty] = cleared;
+    const record = best[runMap];
+    if (cleared > record[runDifficulty]) record[runDifficulty] = cleared;
   }
 
   function save() {
@@ -406,7 +453,7 @@ export function createSim(): Sim {
   function persist() {
     if (typeof localStorage === "undefined") return;
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, best, wins: winsBy, difficulty }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 3, best, wins: winsBy, difficulty, map: mapId }));
     } catch {
       /* private mode */
     }
@@ -487,7 +534,7 @@ export function createSim(): Sim {
       lives = Math.max(0, lives - 1);
       world.shake = Math.min(1, world.shake + (enemy.kind === "boss" ? 1 : 0.55));
       world.hurt = 1;
-      const gate = WAYPOINTS[WAYPOINTS.length - 1]!;
+      const gate = gateOf(world.map);
       float(gate.x, gate.y - 0.4, "−1", "#e25b3a");
       addFlash(gate.x, gate.y, 2.4, "#e25b3a", 0.5);
       sfx("leak");
@@ -545,8 +592,11 @@ export function createSim(): Sim {
     const def = ENEMIES[kind];
     const scale = waveScale(waveIndex);
     const hp = Math.round(def.hp * DIFFICULTIES[runDifficulty].hp * scale.hp);
-    const origin = WAYPOINTS[0]!;
-    const next = WAYPOINTS[1] ?? origin;
+    // на карте с двумя порталами твари выходят по очереди из каждого
+    const route = spawnCount++ % world.map.routes.length;
+    const points = world.map.routes[route]!;
+    const origin = points[0]!;
+    const next = points[1] ?? origin;
     const ang = Math.atan2(next.y - origin.y, next.x - origin.x);
     const side = (Math.random() - 0.5) * 0.18;
     const enemy: Creep = {
@@ -554,6 +604,7 @@ export function createSim(): Sim {
       kind,
       x: origin.x + Math.cos(ang + Math.PI / 2) * side,
       y: origin.y + Math.sin(ang + Math.PI / 2) * side,
+      route,
       wpi: 1,
       travel: 0,
       hp,
@@ -613,7 +664,7 @@ export function createSim(): Sim {
       phase = "victory";
       banner = "Димон устоял";
       bannerT = 4;
-      if (!cheated) winsBy[runDifficulty] += 1;
+      if (!cheated) winsBy[runMap][runDifficulty] += 1;
       sfx("win");
       save();
     } else {
@@ -638,10 +689,13 @@ export function createSim(): Sim {
     world.decals = [];
     world.flashes = [];
     runDifficulty = difficulty;
+    runMap = mapId;
+    world.map = getMap(runMap);
+    spawnCount = 0;
     occ.clear();
     byId.clear();
     queue = [];
-    gold = DIFFICULTIES[difficulty].gold;
+    gold = startGold();
     lives = DIFFICULTIES[difficulty].lives;
     waveIndex = 0;
     cleared = 0;
@@ -772,8 +826,9 @@ export function createSim(): Sim {
       let left = enemy.speed * mult * dt;
       enemy.vx = 0;
       enemy.vy = 0;
+      const points = world.map.routes[enemy.route]!;
       while (left > 0 && enemy.alive) {
-        const wp = WAYPOINTS[enemy.wpi];
+        const wp = points[enemy.wpi];
         if (!wp) {
           leakEnemy(enemy);
           break;
@@ -783,7 +838,7 @@ export function createSim(): Sim {
         const dist = Math.hypot(dx, dy);
         if (dist < 0.0001) {
           enemy.wpi++;
-          if (enemy.wpi >= WAYPOINTS.length) leakEnemy(enemy);
+          if (enemy.wpi >= points.length) leakEnemy(enemy);
           continue;
         }
         enemy.vx = dx / dist;
@@ -794,7 +849,7 @@ export function createSim(): Sim {
           enemy.travel += dist;
           left -= dist;
           enemy.wpi++;
-          if (enemy.wpi >= WAYPOINTS.length) {
+          if (enemy.wpi >= points.length) {
             leakEnemy(enemy);
             break;
           }
@@ -893,7 +948,7 @@ export function createSim(): Sim {
   function place(col: number, row: number) {
     if (phase === "menu" || phase === "victory" || phase === "defeat") return;
     if (!build) return;
-    if (!isInside(col, row) || isRoad(col, row)) {
+    if (!isInside(col, row) || isRoad(world.map, col, row)) {
       sfx("deny");
       say("Сюда нельзя — это тропа");
       return;
@@ -968,22 +1023,25 @@ export function createSim(): Sim {
           wins?: unknown;
           best?: unknown;
           difficulty?: unknown;
+          map?: unknown;
         };
-        if (parsed.v === 2) {
-          best = readPer(parsed.best);
-          winsBy = readPer(parsed.wins);
-          if (typeof parsed.difficulty === "string" && parsed.difficulty in DIFFICULTIES) {
-            difficulty = parsed.difficulty as Difficulty;
-          }
+        if (parsed.v === 3) {
+          best = readPerMap(parsed.best);
+          winsBy = readPerMap(parsed.wins);
+          if (typeof parsed.map === "string" && parsed.map in MAPS) mapId = parsed.map as MapId;
+        } else if (parsed.v === 2) {
+          // v2 знал только одну карту — нынешнюю «Пепельную тропу».
+          best.ash = readPer(parsed.best);
+          winsBy.ash = readPer(parsed.wins);
         } else {
           // v1 хранил один рекорд — это был обычный режим.
-          if (typeof parsed.bestWave === "number") best.normal = parsed.bestWave;
-          if (typeof parsed.wins === "number") winsBy.normal = parsed.wins;
+          if (typeof parsed.bestWave === "number") best.ash.normal = parsed.bestWave;
+          if (typeof parsed.wins === "number") winsBy.ash.normal = parsed.wins;
         }
-        if (phase === "menu") {
-          gold = DIFFICULTIES[difficulty].gold;
-          lives = DIFFICULTIES[difficulty].lives;
+        if ((parsed.v === 2 || parsed.v === 3) && typeof parsed.difficulty === "string" && parsed.difficulty in DIFFICULTIES) {
+          difficulty = parsed.difficulty as Difficulty;
         }
+        if (phase === "menu") previewMap();
         flush();
       } catch {
         /* ignore */
@@ -1003,10 +1061,15 @@ export function createSim(): Sim {
       if (phase !== "menu" && phase !== "victory" && phase !== "defeat") return;
       if (next === difficulty) return;
       difficulty = next;
-      if (phase === "menu") {
-        gold = DIFFICULTIES[difficulty].gold;
-        lives = DIFFICULTIES[difficulty].lives;
-      }
+      if (phase === "menu") previewMap();
+      persist();
+      flush();
+    },
+    setMap(next) {
+      if (phase !== "menu" && phase !== "victory" && phase !== "defeat") return;
+      if (next === mapId) return;
+      mapId = next;
+      if (phase === "menu") previewMap();
       persist();
       flush();
     },

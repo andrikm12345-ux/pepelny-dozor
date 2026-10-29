@@ -242,20 +242,115 @@ export const TARGETS: { id: TargetMode; label: string }[] = [
   { id: "strong", label: "Сильный" },
 ];
 
-/** Axis-aligned corners. Enemies walk this polyline; cells between them are the road. */
-export const CORNERS: Array<[number, number]> = [
-  [0, 1],
-  [6, 1],
-  [6, 4],
-  [2, 4],
-  [2, 7],
-  [8, 7],
-  [8, 3],
-  [12, 3],
-  [12, 8],
-  [16, 8],
-  [16, 10],
-];
+export type MapId = "ash" | "serpent" | "descent" | "twin";
+
+type Corners = Array<[number, number]>;
+
+export interface MapDef {
+  id: MapId;
+  name: string;
+  blurb: string;
+  /** Тропы как углы ломаной; все кончаются в одной клетке — вратах. */
+  routes: Corners[];
+  /** Прибавка к стартовому золоту. */
+  gold: number;
+}
+
+export interface Waypoint {
+  x: number;
+  y: number;
+}
+
+export interface GameMap {
+  def: MapDef;
+  /** Точки поворота для каждой тропы, в центрах клеток. */
+  routes: Waypoint[][];
+  road: Set<string>;
+}
+
+export const MAP_ORDER: MapId[] = ["ash", "serpent", "descent", "twin"];
+
+export const MAPS: Record<MapId, MapDef> = {
+  ash: {
+    id: "ash",
+    name: "Пепельная тропа",
+    blurb: "Старая дорога к вратам Димона. Петли, углы, всего понемногу.",
+    routes: [
+      [
+        [0, 1],
+        [6, 1],
+        [6, 4],
+        [2, 4],
+        [2, 7],
+        [8, 7],
+        [8, 3],
+        [12, 3],
+        [12, 8],
+        [16, 8],
+        [16, 10],
+      ],
+    ],
+    gold: 0,
+  },
+  serpent: {
+    id: "serpent",
+    name: "Змеиный овраг",
+    blurb: "Длинная змейка. Твари долго ползут под стрелами.",
+    routes: [
+      [
+        [0, 1],
+        [15, 1],
+        [15, 3],
+        [2, 3],
+        [2, 5],
+        [15, 5],
+        [15, 7],
+        [2, 7],
+        [2, 9],
+        [17, 9],
+      ],
+    ],
+    gold: 0,
+  },
+  descent: {
+    id: "descent",
+    name: "Короткий спуск",
+    blurb: "Два поворота до врат, времени мало. Димон даёт +250 золота на старте.",
+    routes: [
+      [
+        [0, 2],
+        [10, 2],
+        [10, 8],
+        [17, 8],
+      ],
+    ],
+    gold: 250,
+  },
+  twin: {
+    id: "twin",
+    name: "Два портала",
+    blurb: "Волна делится надвое и сходится у врат. Держи место встречи. +250 золота на старте.",
+    routes: [
+      [
+        [0, 1],
+        [5, 1],
+        [5, 3],
+        [9, 3],
+        [9, 5],
+        [17, 5],
+      ],
+      [
+        [0, 9],
+        [5, 9],
+        [5, 7],
+        [9, 7],
+        [9, 5],
+        [17, 5],
+      ],
+    ],
+    gold: 250,
+  },
+};
 
 export function buildPath(corners: Array<[number, number]>): Array<[number, number]> {
   const cells: Array<[number, number]> = [];
@@ -275,25 +370,48 @@ export function buildPath(corners: Array<[number, number]>): Array<[number, numb
   return cells;
 }
 
-export const PATH_CELLS = buildPath(CORNERS);
-export const PATH_SET = new Set(PATH_CELLS.map(([c, r]) => `${c},${r}`));
+/** Собирает карту и проверяет её: в пределах поля, без самопересечений, одни врата. */
+export function buildMap(def: MapDef): GameMap {
+  const road = new Set<string>();
+  let gate = "";
+  for (const corners of def.routes) {
+    const seen = new Set<string>();
+    for (const [c, r] of buildPath(corners)) {
+      if (!isInside(c, r)) throw new Error(`${def.id}: path out of bounds`);
+      const key = `${c},${r}`;
+      if (seen.has(key)) throw new Error(`${def.id}: path overlaps at ${key}`);
+      seen.add(key);
+      road.add(key);
+    }
+    const [gc, gr] = corners[corners.length - 1]!;
+    if (gate && gate !== `${gc},${gr}`) throw new Error(`${def.id}: routes end at different gates`);
+    gate = `${gc},${gr}`;
+  }
+  return {
+    def,
+    routes: def.routes.map((corners) => corners.map(([c, r]) => ({ x: c + 0.5, y: r + 0.5 }))),
+    road,
+  };
+}
 
-export const WAYPOINTS = CORNERS.map(([c, r]) => ({ x: c + 0.5, y: r + 0.5 }));
+const BUILT = Object.fromEntries(MAP_ORDER.map((id) => [id, buildMap(MAPS[id])])) as Record<MapId, GameMap>;
 
-const seen = new Set<string>();
-for (const [c, r] of PATH_CELLS) {
-  if (c < 0 || r < 0 || c >= COLS || r >= ROWS) throw new Error("path out of bounds");
-  const key = `${c},${r}`;
-  if (seen.has(key)) throw new Error(`path overlaps at ${key}`);
-  seen.add(key);
+export function getMap(id: MapId): GameMap {
+  return BUILT[id];
 }
 
 export function isInside(col: number, row: number): boolean {
   return col >= 0 && row >= 0 && col < COLS && row < ROWS;
 }
 
-export function isRoad(col: number, row: number): boolean {
-  return PATH_SET.has(`${col},${row}`);
+export function isRoad(map: GameMap, col: number, row: number): boolean {
+  return map.road.has(`${col},${row}`);
+}
+
+/** Клетка врат — общий конец всех троп карты. */
+export function gateOf(map: GameMap): Waypoint {
+  const route = map.routes[0]!;
+  return route[route.length - 1]!;
 }
 
 export function dmgMult(rank: number): number {

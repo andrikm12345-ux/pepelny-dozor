@@ -1,4 +1,4 @@
-import { COLS, ROWS, TOWERS, WAYPOINTS, isRoad } from "./balance";
+import { COLS, ROWS, TOWERS, gateOf, isRoad, type GameMap, type Waypoint } from "./balance";
 import type { Creep, Shot, Tower, World } from "./sim";
 
 export interface Board {
@@ -72,8 +72,8 @@ function makeCanvas(w: number, h: number) {
 }
 
 /** Лента тропы: от портала чуть за край поля до врат. */
-function pathRibbon({ cell, ox, oy }: Board): Pt[] {
-  const pts = WAYPOINTS.map((point) => ({ x: ox + point.x * cell, y: oy + point.y * cell }));
+function pathRibbon({ cell, ox, oy }: Board, points: Waypoint[]): Pt[] {
+  const pts = points.map((point) => ({ x: ox + point.x * cell, y: oy + point.y * cell }));
   const first = pts[0]!;
   const second = pts[1] ?? first;
   const last = pts[pts.length - 1]!;
@@ -174,7 +174,7 @@ export function createRenderer(): Renderer {
   }
 
   /** Неподвижная часть: камень, трещины, мох, тропа. Перерисовывается только при смене размера. */
-  function buildGround(width: number, height: number, dpr: number) {
+  function buildGround(width: number, height: number, dpr: number, map: GameMap) {
     const board = boardLayout(width, height);
     const { cell, ox, oy } = board;
     const canvas = makeCanvas(width * dpr, height * dpr);
@@ -205,7 +205,7 @@ export function createRenderer(): Renderer {
     const radius = Math.max(2, cell * 0.14);
     for (let row = 0; row < ROWS; row++) {
       for (let col = 0; col < COLS; col++) {
-        if (isRoad(col, row)) continue;
+        if (isRoad(map, col, row)) continue;
         const n = hash(col, row);
         const x = ox + col * cell + gap;
         const y = oy + row * cell + gap;
@@ -270,26 +270,26 @@ export function createRenderer(): Renderer {
       }
     }
 
-    const ribbon = pathRibbon(board);
+    // слоями по всем тропам сразу, чтобы место слияния не перечёркивало само себя
+    const ribbons = map.routes.map((points) => pathRibbon(board, points));
     g.lineCap = "round";
     g.lineJoin = "round";
-    g.strokeStyle = "#140d09";
-    g.lineWidth = cell * 1.0;
-    strokePath(g, ribbon);
-    g.strokeStyle = "#3f2c22";
-    g.lineWidth = cell * 0.78;
-    strokePath(g, ribbon);
-    g.strokeStyle = "#5a4031";
-    g.lineWidth = cell * 0.48;
-    strokePath(g, ribbon);
-    g.strokeStyle = "rgba(255, 220, 170, 0.05)";
-    g.lineWidth = cell * 0.18;
-    strokePath(g, ribbon);
+    const layers: Array<[string, number]> = [
+      ["#140d09", 1.0],
+      ["#3f2c22", 0.78],
+      ["#5a4031", 0.48],
+      ["rgba(255, 220, 170, 0.05)", 0.18],
+    ];
+    for (const [color, widthK] of layers) {
+      g.strokeStyle = color;
+      g.lineWidth = cell * widthK;
+      for (const ribbon of ribbons) strokePath(g, ribbon);
+    }
 
     // булыжники и колеи вдоль тропы
-    for (let i = 0; i < ribbon.length - 1; i++) {
-      const a = ribbon[i]!;
-      const b = ribbon[i + 1]!;
+    const segments = ribbons.flatMap((ribbon) => ribbon.slice(1).map((b, i) => [ribbon[i]!, b] as const));
+    for (let i = 0; i < segments.length; i++) {
+      const [a, b] = segments[i]!;
       const len = Math.hypot(b.x - a.x, b.y - a.y);
       const steps = Math.floor(len / (cell * 0.22));
       const nx = -(b.y - a.y) / (len || 1);
@@ -372,9 +372,10 @@ export function createRenderer(): Renderer {
     const dpr = ctx.getTransform().a || 1;
 
     const key = `${width}x${height}@${dpr}`;
-    if (!ground || groundKey !== key) {
-      ground = buildGround(width, height, dpr);
-      groundKey = key;
+    const groundFor = `${key}:${world.map.def.id}`;
+    if (!ground || groundKey !== groundFor) {
+      ground = buildGround(width, height, dpr, world.map);
+      groundKey = groundFor;
     }
     if (!shade || shadeKey !== key) {
       shade = buildShade(width, height);
@@ -389,14 +390,14 @@ export function createRenderer(): Renderer {
     }
     ctx.drawImage(ground, 0, 0, width, height);
 
-    const ribbon = pathRibbon(board);
+    const ribbons = world.map.routes.map((points) => pathRibbon(board, points));
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = "rgba(226, 177, 90, 0.22)";
     ctx.lineWidth = Math.max(1, cell * 0.05);
     ctx.setLineDash([cell * 0.22, cell * 0.55]);
     ctx.lineDashOffset = -anim * cell * 0.55;
-    strokePath(ctx, ribbon);
+    for (const ribbon of ribbons) strokePath(ctx, ribbon);
     ctx.setLineDash([]);
 
     // пепельные следы
@@ -427,10 +428,9 @@ export function createRenderer(): Renderer {
     }
     ctx.globalAlpha = 1;
 
-    const first = ribbon[1]!;
-    const last = ribbon[ribbon.length - 2]!;
-    drawPortal(ctx, first.x, first.y, cell, anim);
-    drawGate(ctx, last.x, last.y, cell, anim);
+    for (const ribbon of ribbons) drawPortal(ctx, ribbon[1]!.x, ribbon[1]!.y, cell, anim);
+    const gate = gateOf(world.map);
+    drawGate(ctx, ox + gate.x * cell, oy + gate.y * cell, cell, anim);
 
     // башни сверху вниз, чтобы нижние перекрывали верхние
     const towers = [...world.towers].sort((a, b) => a.row - b.row);
@@ -778,9 +778,11 @@ export function createRenderer(): Renderer {
     l.globalCompositeOperation = "destination-out";
 
     const lights: Array<[string, number, number, number, number]> = [];
-    const first = WAYPOINTS[0]!;
-    const gate = WAYPOINTS[WAYPOINTS.length - 1]!;
-    lights.push(["rgba(226, 91, 58, 1)", ox + first.x * cell, oy + first.y * cell, cell * 2.2, 0.5 + Math.sin(anim * 3) * 0.08]);
+    const gate = gateOf(world.map);
+    for (const route of world.map.routes) {
+      const first = route[0]!;
+      lights.push(["rgba(226, 91, 58, 1)", ox + first.x * cell, oy + first.y * cell, cell * 2.2, 0.5 + Math.sin(anim * 3) * 0.08]);
+    }
     lights.push(["rgba(226, 177, 90, 1)", ox + gate.x * cell, oy + gate.y * cell, cell * 2.6, 0.55 + Math.sin(anim * 2.2) * 0.06]);
     for (const tower of world.towers) {
       const { x, y } = towerCenter(tower, board);
@@ -834,7 +836,7 @@ export function createRenderer(): Renderer {
     }
     if (world.build && world.hoverCol >= 0) {
       const open =
-        !isRoad(world.hoverCol, world.hoverRow) &&
+        !isRoad(world.map, world.hoverCol, world.hoverRow) &&
         !world.towers.some((t) => t.col === world.hoverCol && t.row === world.hoverRow);
       const def = TOWERS[world.build];
       rangeRing(ctx, board, world.hoverCol, world.hoverRow, def.range, open ? def.shot : "#e25b3a", open);
