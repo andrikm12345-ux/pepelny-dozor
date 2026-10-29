@@ -198,6 +198,8 @@ export interface Hud {
   wins: number;
   difficulty: Difficulty;
   livesTotal: number;
+  /** Чит: золото не тратится. */
+  cheat: boolean;
   paused: boolean;
   speed: 1 | 2;
   muted: boolean;
@@ -222,6 +224,7 @@ export interface Sim {
   togglePause(): void;
   toggleSpeed(): void;
   toggleMute(): void;
+  toggleCheat(): void;
   selectBuild(kind: TowerKind): void;
   dismiss(): void;
   setTarget(mode: TargetMode): void;
@@ -261,6 +264,9 @@ export function createSim(): Sim {
   let paused = false;
   let speed: 1 | 2 = 1;
   let muted = false;
+  let cheat = false;
+  /** Чит включали в этом забеге — рекорды не пишем. */
+  let cheated = false;
   let build: TowerKind | null = null;
   let selectedId = 0;
   let banner = "";
@@ -331,6 +337,7 @@ export function createSim(): Sim {
       wins: winsBy[difficulty],
       difficulty,
       livesTotal: DIFFICULTIES[difficulty].lives,
+      cheat,
       paused,
       speed,
       muted,
@@ -368,7 +375,17 @@ export function createSim(): Sim {
     audio.play(name);
   }
 
+  /** Хватает ли золота; в чит-режиме — всегда. */
+  function canPay(cost: number) {
+    return cheat || gold >= cost;
+  }
+
+  function pay(cost: number) {
+    if (!cheat) gold -= cost;
+  }
+
   function noteBest() {
+    if (cheated) return;
     if (cleared > best[difficulty]) best[difficulty] = cleared;
   }
 
@@ -587,7 +604,7 @@ export function createSim(): Sim {
       phase = "victory";
       banner = "Димон устоял";
       bannerT = 4;
-      winsBy[difficulty] += 1;
+      if (!cheated) winsBy[difficulty] += 1;
       sfx("win");
       save();
     } else {
@@ -633,6 +650,7 @@ export function createSim(): Sim {
     world.shake = 0;
     world.hurt = 0;
     acc = 0;
+    cheated = cheat;
     phase = "prep";
     banner = "Башни Димона вдоль тропы";
     bannerT = 3.2;
@@ -876,12 +894,12 @@ export function createSim(): Sim {
       return;
     }
     const def = TOWERS[build];
-    if (gold < def.cost) {
+    if (!canPay(def.cost)) {
       sfx("deny");
       say("Не хватает золота");
       return;
     }
-    gold -= def.cost;
+    pay(def.cost);
     const tower: Tower = {
       id: nextId++,
       kind: build,
@@ -990,6 +1008,13 @@ export function createSim(): Sim {
       speed = speed === 1 ? 2 : 1;
       flush();
     },
+    toggleCheat() {
+      cheat = !cheat;
+      if (cheat && phase !== "menu") cheated = true;
+      banner = cheat ? "Чит: золото без счёта. Рекорды не пишутся" : "Чит выключен";
+      bannerT = 2.6;
+      flush();
+    },
     toggleMute() {
       audio.unlock();
       muted = !muted;
@@ -1005,7 +1030,7 @@ export function createSim(): Sim {
         return;
       }
       const def = TOWERS[kind];
-      if (gold < def.cost) {
+      if (!canPay(def.cost)) {
         sfx("deny");
         say("Не хватает золота");
         return;
@@ -1033,12 +1058,12 @@ export function createSim(): Sim {
       const rank = track === "dmg" ? tower.dmgRank : tower.rateRank;
       if (rank >= MAX_RANK) return;
       const cost = upgradeCost(TOWERS[tower.kind].cost, rank);
-      if (gold < cost) {
+      if (!canPay(cost)) {
         sfx("deny");
         say("Не хватает золота");
         return;
       }
-      gold -= cost;
+      pay(cost);
       tower.spent += cost;
       if (track === "dmg") tower.dmgRank++;
       else tower.rateRank++;

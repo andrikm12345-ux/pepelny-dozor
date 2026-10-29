@@ -4,6 +4,7 @@ import {
   Crosshair,
   Flame,
   Heart,
+  Infinity as InfinityIcon,
   Pause,
   Play,
   RotateCcw,
@@ -141,7 +142,7 @@ export function GameApp() {
             tone={hud.lives <= 5 ? "text-ember" : "text-fg"}
             pulse={hud.lives}
           />
-          <Stat icon={Coins} label="Золото" value={`${gold}`} tone="text-gold" pulse={hud.gold} />
+          <Stat icon={Coins} label="Золото" value={hud.cheat ? "∞" : `${gold}`} tone="text-gold" pulse={hud.gold} />
           <Stat
             icon={Crosshair}
             label="Волна"
@@ -156,6 +157,13 @@ export function GameApp() {
           </IconButton>
           <IconButton label={hud.speed === 1 ? "Ускорить" : "Обычная скорость"} onClick={sim.toggleSpeed} disabled={ended}>
             <span className="text-xs font-semibold">{hud.speed === 1 ? "1×" : "2×"}</span>
+          </IconButton>
+          <IconButton
+            label={hud.cheat ? "Выключить чит" : "Чит: бесконечное золото"}
+            onClick={sim.toggleCheat}
+            active={hud.cheat}
+          >
+            <InfinityIcon className="size-4" />
           </IconButton>
           <IconButton label={hud.muted ? "Включить звук" : "Выключить звук"} onClick={sim.toggleMute}>
             {hud.muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
@@ -255,7 +263,7 @@ export function GameApp() {
                 const def = TOWERS[kind];
                 const Icon = ICONS[kind];
                 const active = hud.build === kind;
-                const poor = hud.gold < def.cost;
+                const poor = !hud.cheat && hud.gold < def.cost;
                 return (
                   <button
                     key={kind}
@@ -443,11 +451,13 @@ function IconButton({
   label,
   onClick,
   disabled,
+  active,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  active?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -456,8 +466,12 @@ function IconButton({
       aria-label={label}
       title={label}
       disabled={disabled}
+      aria-pressed={active}
       onClick={onClick}
-      className="inline-flex size-11 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-fg disabled:opacity-40"
+      className={cx(
+        "inline-flex size-11 shrink-0 items-center justify-center rounded-full border disabled:opacity-40",
+        active ? "border-gold bg-gold text-bg" : "border-line bg-surface text-fg",
+      )}
     >
       {children}
     </button>
@@ -505,14 +519,14 @@ function Inspector({ hud, sim }: { hud: Hud; sim: Sim }) {
           label="Урон"
           rank={selection.dmgRank}
           cost={selection.dmgCost}
-          gold={hud.gold}
+          gold={hud.cheat ? Number.POSITIVE_INFINITY : hud.gold}
           onClick={() => sim.upgrade("dmg")}
         />
         <Upgrade
           label="Скорострельность"
           rank={selection.rateRank}
           cost={selection.rateCost}
-          gold={hud.gold}
+          gold={hud.cheat ? Number.POSITIVE_INFINITY : hud.gold}
           onClick={() => sim.upgrade("rate")}
         />
       </div>
