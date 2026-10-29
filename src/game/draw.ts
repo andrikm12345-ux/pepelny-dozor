@@ -471,6 +471,18 @@ export function createRenderer(): Renderer {
 
     drawLighting(ctx, world, board, width, height, anim);
 
+    // вспышка Заморозки: холодный свет по всему полю
+    if (world.freezeT > 0) {
+      const k = clamp01(world.freezeT / 0.9);
+      const grad = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.2, width / 2, height / 2, Math.max(width, height) * 0.7);
+      grad.addColorStop(0, `rgba(190, 230, 255, ${0.1 * k})`);
+      grad.addColorStop(1, `rgba(120, 190, 240, ${0.35 * k})`);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalCompositeOperation = "source-over";
+    }
+
     // искры и осколки поверх света — они сами светятся
     ctx.globalCompositeOperation = "lighter";
     for (const particle of world.particles) {
@@ -721,7 +733,27 @@ export function createRenderer(): Renderer {
         ctx.stroke();
       }
     }
-    if (enemy.stun > 0) {
+    if (enemy.iceT > 0) {
+      // льдина: полупрозрачный блок с бликом
+      const half = size * 0.34;
+      ctx.fillStyle = "rgba(170, 225, 255, 0.45)";
+      ctx.strokeStyle = "rgba(235, 248, 255, 0.95)";
+      ctx.lineWidth = Math.max(1.5, cell * 0.04);
+      ctx.beginPath();
+      ctx.moveTo(x - half, y - half * 0.55);
+      ctx.lineTo(x - half * 0.4, y - half * 1.15);
+      ctx.lineTo(x + half * 0.7, y - half * 0.95);
+      ctx.lineTo(x + half, y + half * 0.5);
+      ctx.lineTo(x + half * 0.2, y + half * 1.05);
+      ctx.lineTo(x - half * 0.8, y + half * 0.85);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - half * 0.5, y - half * 0.4);
+      ctx.lineTo(x - half * 0.1, y - half * 0.8);
+      ctx.stroke();
+    } else if (enemy.stun > 0) {
       ctx.fillStyle = "#ffe08a";
       for (let k = 0; k < 3; k++) {
         const a = anim * 7 + (k * Math.PI * 2) / 3;

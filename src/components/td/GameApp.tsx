@@ -21,6 +21,7 @@ import {
   Target,
   Volume2,
   VolumeX,
+  Wind,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -135,6 +136,7 @@ export function GameApp() {
       else if (event.code === "Digit5") sim.selectBuild("tesla");
       else if (event.code === "Digit6") sim.selectBuild("banner");
       else if (event.code === "KeyQ") sim.toggleAim();
+      else if (event.code === "KeyE") sim.freeze();
       else if (event.code === "KeyZ" || event.code === "KeyX") {
         const pick = sim.getSnapshot().selection?.specs[event.code === "KeyZ" ? 0 : 1];
         if (pick) sim.specialize(pick.id);
@@ -234,6 +236,13 @@ export function GameApp() {
               />
             )}
           </IconButton>
+          <IconButton label="Заморозка Димона (E)" onClick={sim.freeze} disabled={ended}>
+            {hud.freezeLeft > 0 ? (
+              <span className="text-xs font-semibold tabular-nums text-muted">{hud.freezeLeft}</span>
+            ) : (
+              <Wind className={cx("size-4", hud.phase === "combat" && "text-gold")} />
+            )}
+          </IconButton>
           <IconButton
             label={hud.cheat ? "Выключить чит" : "Чит: бесконечное золото"}
             onClick={sim.toggleCheat}
@@ -294,6 +303,7 @@ export function GameApp() {
               <p className="font-display text-4xl text-gold">Пауза</p>
             </div>
           )}
+          {hud.event && <EventCard event={hud.event} sim={sim} />}
           {hud.phase === "prep" && (
             <div className="absolute inset-x-0 bottom-3 flex flex-col items-center gap-2 px-3">
               <TutorialHint hud={hud} />
@@ -704,6 +714,35 @@ function Inspector({ hud, sim }: { hud: Hud; sim: Sim }) {
         Продать за {selection.sell}
       </button>
     </section>
+  );
+}
+
+/** Событие на тропе между волнами: два выбора, таймер ждёт. */
+function EventCard({ event, sim }: { event: NonNullable<Hud["event"]>; sim: Sim }) {
+  return (
+    <div className="absolute inset-x-3 top-14 z-10 mx-auto max-w-md rounded-2xl border border-gold/50 bg-bg/95 p-3 shadow-xl backdrop-blur-sm sm:top-20">
+      <p className="text-xs tracking-[0.2em] text-ember uppercase">На тропе</p>
+      <h2 className="font-display text-2xl leading-tight text-gold">{event.title}</h2>
+      <p className="mt-1 text-sm leading-snug text-fg">{event.text}</p>
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {event.options.map((option, index) => (
+          <button
+            key={option.label}
+            type="button"
+            data-testid={`event-${index}`}
+            disabled={option.disabled}
+            onClick={() => sim.chooseEvent(index === 0 ? 0 : 1)}
+            className="flex min-h-11 flex-col items-start gap-0.5 rounded-xl border border-line bg-surface px-3 py-2 text-left disabled:opacity-45"
+          >
+            <span className="flex w-full items-baseline justify-between gap-2 text-sm font-semibold">
+              {option.label}
+              {option.cost > 0 && <span className="text-gold tabular-nums">{option.cost}</span>}
+            </span>
+            <span className="text-xs leading-snug text-muted">{option.hint}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

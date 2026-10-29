@@ -193,7 +193,13 @@ export function abilityDamage(waveIndex: number): number {
   return ABILITY_BASE + ABILITY_PER_WAVE * waveIndex;
 }
 
-/** Щитоносец: хрупкость и горение живут столько секунд. */
+/** Заморозка Димона: все твари на поле встают, а потом ещё немного получают лишний урон. */
+export const FREEZE_COOLDOWN = 40;
+export const FREEZE_TIME = 2.2;
+export const FREEZE_BOSS = 0.5;
+export const FREEZE_BRITTLE = 0.2;
+
+/** Хрупкость и горение живут столько секунд. */
 export const BRITTLE_TIME = 3;
 export const BURN_TIME = 2.5;
 

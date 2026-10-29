@@ -6,14 +6,20 @@ import {
   BRITTLE_TIME,
   BURN_TIME,
   CHAIN_REACH,
+  COLS,
   DIFFICULTIES,
   ENEMIES,
+  FREEZE_BOSS,
+  FREEZE_BRITTLE,
+  FREEZE_COOLDOWN,
+  FREEZE_TIME,
   HEAL_EVERY,
   HEAL_FRACTION,
   HEAL_RADIUS,
   MAX_RANK,
   NO_BUFF,
   PREP_SECONDS,
+  ROWS,
   SELL_RATIO,
   SPECS,
   SPEC_BY_ID,
@@ -44,9 +50,27 @@ import {
   type WaveEntry,
 } from "./balance";
 import { createAudio, type SfxName } from "./audio";
+import { EVENTS, EVENT_ORDER, type EventId } from "./events";
 
 const SAVE_KEY = "pepelny-dozor-v1";
 const RUN_KEY = "pepelny-dozor-run-v1";
+
+/** Что событие даёт на следующую волну. */
+interface Bonus {
+  dmg: number;
+  hp: number;
+  healers: number;
+}
+
+const NO_BONUS: Bonus = { dmg: 0, hp: 1, healers: 0 };
+
+/** Событие, ожидающее выбора. */
+export interface EventView {
+  id: EventId;
+  title: string;
+  text: string;
+  options: Array<{ label: string; hint: string; cost: number; disabled: boolean }>;
+}
 
 /** Забег между волнами: достаточно, чтобы продолжить с места. */
 interface SavedRun {
@@ -62,6 +86,9 @@ interface SavedRun {
   killed: number;
   leaked: number;
   abilityCd: number;
+  freezeCd?: number;
+  /** Эффект события на следующую волну. */
+  bonus?: Bonus;
   towers: Array<{
     kind: TowerKind;
     col: number;
@@ -148,6 +175,8 @@ export interface Creep {
   summonT: number;
   /** Кто призвал; 0 — вышел из портала сам. */
   ownerId: number;
+  /** Секунд во льду после Заморозки. */
+  iceT: number;
 }
 
 export interface Tower {
@@ -285,6 +314,8 @@ export interface World {
   bolts: Bolt[];
   fires: Fire[];
   strikes: Strike[];
+  /** Секунд до конца вспышки Заморозки — для холодного света на поле. */
+  freezeT: number;
   map: GameMap;
   hoverCol: number;
   hoverRow: number;
@@ -358,6 +389,9 @@ export interface Hud {
   towerCount: number;
   /** Секунд до готовности обвала; 0 — можно бить. */
   abilityLeft: number;
+  /** Секунд до готовности Заморозки; 0 — можно жать. */
+  freezeLeft: number;
+  event: EventView | null;
   aiming: boolean;
   savedRun: RunSummary | null;
   paused: boolean;
@@ -385,6 +419,8 @@ export interface Sim {
   setMap(id: MapId): void;
   continueRun(): void;
   toggleAim(): void;
+  freeze(): void;
+  chooseEvent(index: 0 | 1): void;
   togglePause(): void;
   toggleSpeed(): void;
   toggleMute(): void;
@@ -434,6 +470,11 @@ export function createSim(): Sim {
   let spawnCount = 0;
   let abilityCd = 0;
   let abilityShown = 0;
+  let freezeCd = 0;
+  let freezeShown = 0;
+  let eventId: EventId | null = null;
+  let lastEvent: EventId | null = null;
+  let bonus: Bonus = NO_BONUS;
   let aiming = false;
   let savedRun: SavedRun | null = null;
   let paused = false;
@@ -469,6 +510,7 @@ export function createSim(): Sim {
     bolts: [],
     fires: [],
     strikes: [],
+    freezeT: 0,
     map: getMap(mapId),
     hoverCol: -1,
     hoverRow: -1,
@@ -515,6 +557,23 @@ export function createSim(): Sim {
   function refreshTowers() {
     for (const tower of world.towers) tower.buff = bannerBuff(tower);
     for (const tower of world.towers) tower.range = statsOf(tower).range;
+  }
+
+  function eventView(): EventView | null {
+    if (!eventId) return null;
+    const def = EVENTS[eventId];
+    return {
+      id: def.id,
+      title: def.title,
+      text: def.text,
+      options: def.options.map((option, index) => ({
+        label: option.label,
+        hint: option.hint,
+        cost: option.cost,
+        disabled:
+          (option.cost > 0 && !cheat && gold < option.cost) || (def.id === "well" && index === 0 && lives <= 2),
+      })),
+    };
   }
 
   function assemble(): Hud {
@@ -575,6 +634,8 @@ export function createSim(): Sim {
       endless,
       towerCount: world.towers.length,
       abilityLeft: Math.ceil(abilityCd),
+      freezeLeft: Math.ceil(freezeCd),
+      event: eventView(),
       aiming,
       savedRun: savedRun
         ? {
@@ -833,7 +894,7 @@ export function createSim(): Sim {
   function makeCreep(kind: EnemyKind, route: number, x: number, y: number, goldShare = 1): Creep {
     const def = ENEMIES[kind];
     const scale = waveScale(waveIndex);
-    const hp = Math.round(def.hp * DIFFICULTIES[runDifficulty].hp * scale.hp);
+    const hp = Math.round(def.hp * DIFFICULTIES[runDifficulty].hp * scale.hp * bonus.hp);
     return {
       id: nextId++,
       kind,
@@ -863,6 +924,7 @@ export function createSim(): Sim {
       brittle: 0,
       summonT: def.summon ? def.summon.every * (0.4 + Math.random() * 0.4) : 0,
       ownerId: 0,
+      iceT: 0,
     };
   }
 
@@ -936,7 +998,7 @@ export function createSim(): Sim {
     if (world.fires.some((fire) => fire.life <= 0)) world.fires = world.fires.filter((fire) => fire.life > 0);
   }
 
-  function beginWave(immediate: boolean, bonus = 0) {
+  function beginWave(immediate: boolean, early = 0) {
     const spec = waveSpec(waveIndex);
     queue = [];
     let first = true;
@@ -946,12 +1008,13 @@ export function createSim(): Sim {
         first = false;
       }
     }
+    for (let i = 0; i < bonus.healers; i++) queue.splice(Math.min(queue.length, 2 + i * 3), 0, { kind: "healer", gap: 0.8 });
     combatTotal = queue.length;
     combatLeft = queue.length;
     spawnGap = queue[0]?.gap ?? 0;
     phase = "combat";
-    banner = bonus > 0 ? `+${bonus} золота за спешку` : "";
-    bannerT = bonus > 0 ? 2.2 : 0;
+    banner = early > 0 ? `+${early} золота за спешку` : "";
+    bannerT = early > 0 ? 2.2 : 0;
     sfx("wave");
     dirty = true;
     if (immediate) flush();
@@ -977,10 +1040,24 @@ export function createSim(): Sim {
       prepShown = PREP_SECONDS;
       banner = "Димон выдохнул";
       bannerT = 2;
+      bonus = NO_BONUS;
       save();
       saveRun();
+      // после каждой второй волны на тропе что-то происходит; таймер ждёт выбора
+      if (cleared % 2 === 0) openEvent();
     }
     dirty = true;
+  }
+
+  function openEvent() {
+    const pool = EVENT_ORDER.filter((id) => id !== lastEvent);
+    eventId = pool[Math.floor(Math.random() * pool.length)]!;
+    lastEvent = eventId;
+    prepLeft = null;
+    prepShown = 0;
+    banner = EVENTS[eventId].title;
+    bannerT = 2.5;
+    sfx("event");
   }
 
   function resetBoard() {
@@ -998,6 +1075,12 @@ export function createSim(): Sim {
     spawnCount = 0;
     abilityCd = 0;
     abilityShown = 0;
+    freezeCd = 0;
+    freezeShown = 0;
+    eventId = null;
+    lastEvent = null;
+    bonus = NO_BONUS;
+    world.freezeT = 0;
     aiming = false;
     world.bolts = [];
     world.fires = [];
@@ -1214,6 +1297,28 @@ export function createSim(): Sim {
     flush();
   }
 
+  /** Заморозка Димона: всё на поле встаёт на пару секунд и получает лишний урон. */
+  function castFreeze() {
+    freezeCd = FREEZE_COOLDOWN;
+    freezeShown = Math.ceil(freezeCd);
+    world.freezeT = 0.9;
+    for (const enemy of world.enemies) {
+      if (!enemy.alive) continue;
+      const time = enemy.kind === "boss" ? FREEZE_BOSS : FREEZE_TIME;
+      enemy.stun = Math.max(enemy.stun, time);
+      enemy.iceT = Math.max(enemy.iceT, time);
+      enemy.brittle = Math.max(enemy.brittleT > 0 ? enemy.brittle : 0, FREEZE_BRITTLE);
+      enemy.brittleT = Math.max(enemy.brittleT, time + 1);
+      addRing(enemy.x, enemy.y, 0.1, 0.7, "#cfe7f0", 0.5);
+    }
+    addFlash(COLS / 2, ROWS / 2, 12, "#9ec4d4", 0.6);
+    world.shake = Math.min(1, world.shake + 0.2);
+    sfx("freeze");
+    banner = "Заморозка";
+    bannerT = 1.4;
+    flush();
+  }
+
   function saveRun() {
     if (phase !== "prep" || typeof localStorage === "undefined") return;
     if (waveIndex === 0 && world.towers.length === 0) return;
@@ -1230,6 +1335,8 @@ export function createSim(): Sim {
       killed,
       leaked,
       abilityCd,
+      freezeCd,
+      bonus,
       towers: world.towers.map((tower) => ({
         kind: tower.kind,
         col: tower.col,
@@ -1301,6 +1408,12 @@ export function createSim(): Sim {
         killed: Math.max(0, num(r.killed)),
         leaked: Math.max(0, num(r.leaked)),
         abilityCd: Math.max(0, Math.min(ABILITY_COOLDOWN, num(r.abilityCd))),
+        freezeCd: Math.max(0, Math.min(FREEZE_COOLDOWN, num(r.freezeCd))),
+        bonus: {
+          dmg: Math.max(0, Math.min(1, num(r.bonus?.dmg))),
+          hp: Math.max(0.5, Math.min(1, num(r.bonus?.hp, 1))),
+          healers: Math.max(0, Math.min(4, Math.floor(num(r.bonus?.healers)))),
+        },
         towers,
       };
     } catch {
@@ -1311,6 +1424,7 @@ export function createSim(): Sim {
   function fire(tower: Tower, target: Creep) {
     const def = TOWERS[tower.kind];
     const stats = statsOf(tower);
+    stats.damage *= 1 + bonus.dmg;
     tower.cooldown += 1 / stats.rate;
     tower.recoil = 1;
     const sx = tower.col + 0.5;
@@ -1371,6 +1485,15 @@ export function createSim(): Sim {
         dirty = true;
       }
     }
+    if (phase === "combat" && freezeCd > 0) {
+      freezeCd = Math.max(0, freezeCd - dt);
+      const shown = Math.ceil(freezeCd);
+      if (shown !== freezeShown) {
+        freezeShown = shown;
+        dirty = true;
+      }
+    }
+    if (world.freezeT > 0) world.freezeT = Math.max(0, world.freezeT - dt);
     updateStrikes(dt);
     world.shake *= Math.exp(-2.8 * dt);
 
@@ -1408,6 +1531,7 @@ export function createSim(): Sim {
       if (enemy.flash > 0) enemy.flash = Math.max(0, enemy.flash - dt);
       if (enemy.brittleT > 0) enemy.brittleT = Math.max(0, enemy.brittleT - dt);
       if (enemy.stun > 0) enemy.stun = Math.max(0, enemy.stun - dt);
+      if (enemy.iceT > 0) enemy.iceT = Math.max(0, enemy.iceT - dt);
       const mult = enemy.stun > 0 ? 0 : enemy.slowT > 0 ? enemy.slow : 1;
       let left = enemy.speed * mult * dt;
       enemy.vx = 0;
@@ -1711,6 +1835,9 @@ export function createSim(): Sim {
       leaked = run.leaked;
       abilityCd = run.abilityCd;
       abilityShown = Math.ceil(abilityCd);
+      freezeCd = run.freezeCd ?? 0;
+      freezeShown = Math.ceil(freezeCd);
+      bonus = run.bonus ?? NO_BONUS;
       for (const saved of run.towers) {
         const tower: Tower = {
           id: nextId++,
@@ -1881,8 +2008,80 @@ export function createSim(): Sim {
       saveRun();
       flush();
     },
+    freeze() {
+      audio.unlock();
+      if (phase !== "combat") {
+        say("Заморозка работает только в бою");
+        return;
+      }
+      if (paused) return;
+      if (freezeCd > 0) {
+        sfx("deny");
+        say(`Заморозка будет готова через ${Math.ceil(freezeCd)} с`);
+        return;
+      }
+      castFreeze();
+    },
+    chooseEvent(index) {
+      if (!eventId || phase !== "prep") return;
+      const def = EVENTS[eventId];
+      const option = def.options[index];
+      const view = eventView()!.options[index]!;
+      if (view.disabled) {
+        sfx("deny");
+        say(option.cost > 0 ? "Не хватает золота" : "Тут не получится");
+        return;
+      }
+      if (option.cost > 0) pay(option.cost);
+      switch (eventId) {
+        case "trader":
+          if (index === 0) bonus = { ...bonus, dmg: 0.3 };
+          else gold += 60;
+          break;
+        case "crate":
+          if (index === 1) gold += 30;
+          else if (Math.random() < 0.5) {
+            gold += 160;
+            float(world.map.routes[0]![0]!.x, world.map.routes[0]![0]!.y, "+160", "#e2b15a");
+          } else bonus = { ...bonus, healers: 2 };
+          break;
+        case "well":
+          if (index === 0) {
+            lives = Math.max(1, lives - 2);
+            gold += 200;
+            world.hurt = 1;
+          }
+          break;
+        case "camp":
+          if (index === 0) lives = Math.min(DIFFICULTIES[runDifficulty].lives, lives + 2);
+          else {
+            abilityCd = 0;
+            abilityShown = 0;
+            freezeCd = 0;
+            freezeShown = 0;
+          }
+          break;
+        case "scout":
+          if (index === 0) bonus = { ...bonus, hp: 0.75 };
+          else gold += 20;
+          break;
+      }
+      eventId = null;
+      prepLeft = PREP_SECONDS;
+      prepShown = PREP_SECONDS;
+      sfx("coin");
+      banner = option.hint;
+      bannerT = 2.6;
+      saveRun();
+      flush();
+    },
     callWave() {
       audio.unlock();
+      if (eventId) {
+        sfx("deny");
+        say("Сначала реши, что делать на тропе");
+        return;
+      }
       if (paused || phase !== "prep") return;
       let bonus = 0;
       if (prepLeft !== null && prepLeft > 0) {

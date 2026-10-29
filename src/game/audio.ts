@@ -24,6 +24,8 @@ export type SfxName =
   | "summon"
   | "stun"
   | "spec"
+  | "freeze"
+  | "event"
   | "hit"
   | "coin"
   | "leak"
@@ -248,6 +250,15 @@ export function createAudio(): Sfx {
       tone(392, 0.12, "triangle", 0.04);
       tone(587, 0.14, "triangle", 0.035, 0, 0.08);
       tone(784, 0.3, "sine", 0.035, 0, 0.16);
+    },
+    freeze: () => {
+      noise(0.5, 0.05, 5000);
+      tone(1760, 0.5, "sine", 0.03, -1200);
+      tone(880, 0.6, "triangle", 0.025, -500, 0.05);
+    },
+    event: () => {
+      tone(330, 0.12, "triangle", 0.035);
+      tone(415, 0.12, "triangle", 0.03, 0, 0.1);
     },
     hit: () => {
       const now = typeof performance !== "undefined" ? performance.now() : 0;
