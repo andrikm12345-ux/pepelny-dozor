@@ -3,8 +3,11 @@ type Osc = OscillatorType;
 export interface Sfx {
   unlock(): void;
   setMuted(muted: boolean): void;
+  setMood(mood: Mood): void;
   play(name: SfxName): void;
 }
+
+export type Mood = "calm" | "battle";
 
 export type SfxName =
   | "place"
@@ -19,7 +22,9 @@ export type SfxName =
   | "wave"
   | "upgrade"
   | "win"
-  | "lose";
+  | "lose"
+  | "boom"
+  | "boss";
 
 export function createAudio(): Sfx {
   let ctx: AudioContext | null = null;
@@ -28,6 +33,11 @@ export function createAudio(): Sfx {
   let lastShot = 0;
   let lastCoin = 0;
   let lastHit = 0;
+  let lastBoom = 0;
+  let noiseBuf: AudioBuffer | null = null;
+  let mood: Mood = "calm";
+  let music: { gain: GainNode; filter: BiquadFilterNode } | null = null;
+  let pulse: ReturnType<typeof setInterval> | null = null;
 
   function ensure(): AudioContext | null {
     if (typeof window === "undefined") return null;
@@ -38,6 +48,7 @@ export function createAudio(): Sfx {
       master = ctx.createGain();
       master.gain.value = muted ? 0 : 0.22;
       master.connect(ctx.destination);
+      startMusic(ctx, master);
     }
     if (ctx.state === "suspended") void ctx.resume();
     return ctx;
@@ -61,6 +72,111 @@ export function createAudio(): Sfx {
     osc.stop(t + dur + 0.03);
     osc.onended = () => {
       osc.disconnect();
+      amp.disconnect();
+    };
+  }
+
+  /** Низкий гул заставы: две расстроенные ноты через фильтр, который медленно дышит. */
+  function startMusic(ac: AudioContext, out: GainNode) {
+    const gain = ac.createGain();
+    gain.gain.value = 0;
+    const filter = ac.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 180;
+    filter.Q.value = 2;
+    filter.connect(gain);
+    gain.connect(out);
+    const voices: Array<[number, Osc, number]> = [
+      [55, "sawtooth", 0.5],
+      [55.4, "sawtooth", 0.4],
+      [82.41, "triangle", 0.6],
+      [110.3, "sine", 0.25],
+    ];
+    for (const [freq, type, level] of voices) {
+      const osc = ac.createOscillator();
+      const amp = ac.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      amp.gain.value = level;
+      osc.connect(amp);
+      amp.connect(filter);
+      osc.start();
+    }
+    const lfo = ac.createOscillator();
+    const depth = ac.createGain();
+    lfo.frequency.value = 0.07;
+    depth.gain.value = 70;
+    lfo.connect(depth);
+    depth.connect(filter.frequency);
+    lfo.start();
+    music = { gain, filter };
+    applyMood();
+  }
+
+  function applyMood() {
+    if (!ctx || !music) return;
+    const t = ctx.currentTime;
+    const battle = mood === "battle";
+    music.gain.gain.setTargetAtTime(battle ? 0.11 : 0.06, t, 1.2);
+    music.filter.frequency.setTargetAtTime(battle ? 420 : 180, t, 1.5);
+    if (battle && !pulse) {
+      pulse = setInterval(drum, 860);
+    } else if (!battle && pulse) {
+      clearInterval(pulse);
+      pulse = null;
+    }
+  }
+
+  /** Удар барабана в такт бою — идёт в музыкальную шину, поэтому тише эффектов. */
+  function drum() {
+    const ac = ctx;
+    if (!ac || !music || muted || ac.state !== "running") return;
+    const t = ac.currentTime;
+    const osc = ac.createOscillator();
+    const amp = ac.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(72, t);
+    osc.frequency.exponentialRampToValueAtTime(38, t + 0.28);
+    amp.gain.setValueAtTime(0.0001, t);
+    amp.gain.exponentialRampToValueAtTime(0.9, t + 0.01);
+    amp.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+    osc.connect(amp);
+    amp.connect(music.gain);
+    osc.start(t);
+    osc.stop(t + 0.35);
+    osc.onended = () => {
+      osc.disconnect();
+      amp.disconnect();
+    };
+  }
+
+  function noise(dur: number, gain: number, cutoff: number, delay = 0) {
+    const ac = ctx;
+    if (!ac || !master || muted) return;
+    if (!noiseBuf) {
+      noiseBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.6), ac.sampleRate);
+      const data = noiseBuf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const t = ac.currentTime + delay;
+    const src = ac.createBufferSource();
+    const filter = ac.createBiquadFilter();
+    const amp = ac.createGain();
+    src.buffer = noiseBuf;
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(cutoff, t);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(60, cutoff * 0.2), t + dur);
+    amp.gain.setValueAtTime(0.0001, t);
+    amp.gain.exponentialRampToValueAtTime(gain, t + 0.01);
+    amp.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(filter);
+    filter.connect(amp);
+    amp.connect(master);
+    src.start(t);
+    src.stop(t + dur + 0.05);
+    src.onended = () => {
+      src.disconnect();
+      filter.disconnect();
       amp.disconnect();
     };
   }
@@ -111,6 +227,18 @@ export function createAudio(): Sfx {
     win: () => {
       [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.22, "triangle", 0.04, 0, i * 0.1));
     },
+    boom: () => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      if (now - lastBoom < 90) return;
+      lastBoom = now;
+      noise(0.32, 0.07, 900);
+      tone(70, 0.3, "sine", 0.05, -30);
+    },
+    boss: () => {
+      tone(55, 1.4, "sawtooth", 0.05, -8);
+      tone(82, 1.4, "triangle", 0.045, -6, 0.05);
+      noise(1.2, 0.04, 400);
+    },
     lose: () => {
       tone(220, 0.3, "sawtooth", 0.04, -80);
       tone(160, 0.45, "triangle", 0.04, -40, 0.12);
@@ -120,6 +248,11 @@ export function createAudio(): Sfx {
   return {
     unlock() {
       ensure();
+    },
+    setMood(next) {
+      if (next === mood) return;
+      mood = next;
+      applyMood();
     },
     setMuted(next) {
       muted = next;

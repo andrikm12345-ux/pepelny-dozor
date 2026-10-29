@@ -26,8 +26,8 @@ import {
   type TowerDef,
   type TowerKind,
 } from "@/game/balance";
-import { boardLayout, render } from "@/game/draw";
-import { dimonNote } from "@/game/dimon";
+import { boardLayout, createRenderer } from "@/game/draw";
+import { dimonNote, dimonShout } from "@/game/dimon";
 import { createSim, type Hud, type Sim } from "@/game/sim";
 
 const ICONS: Record<TowerKind, LucideIcon> = {
@@ -58,6 +58,7 @@ export function GameApp() {
       sprites[kind] = img;
     }
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const renderer = createRenderer();
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     let frame = 0;
@@ -77,7 +78,7 @@ export function GameApp() {
         canvas.height = bh;
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      render(ctx, sim.world, sprites, w, h, reduce);
+      renderer.render(ctx, sim.world, sprites, w, h, reduce);
       frame = requestAnimationFrame(paint);
     };
     frame = requestAnimationFrame(paint);
@@ -119,6 +120,9 @@ export function GameApp() {
     };
   };
 
+  const intro = useWaveIntro(hud.phase, hud.wave);
+  const gold = useTweened(hud.gold);
+
   const ended = hud.phase === "menu" || hud.phase === "victory" || hud.phase === "defeat";
   const progress = hud.combatTotal > 0 ? Math.max(0, Math.min(1, 1 - hud.combatLeft / hud.combatTotal)) : 0;
 
@@ -135,8 +139,9 @@ export function GameApp() {
             label="Жизни"
             value={`${hud.lives}`}
             tone={hud.lives <= 5 ? "text-ember" : "text-fg"}
+            pulse={hud.lives}
           />
-          <Stat icon={Coins} label="Золото" value={`${hud.gold}`} tone="text-gold" />
+          <Stat icon={Coins} label="Золото" value={`${gold}`} tone="text-gold" pulse={hud.gold} />
           <Stat
             icon={Crosshair}
             label="Волна"
@@ -182,6 +187,18 @@ export function GameApp() {
               <span aria-live="polite">{hud.banner}</span>
             </div>
           )}
+          {intro && (
+            <div
+              key={intro.key}
+              className="pointer-events-none absolute inset-x-0 top-[22%] flex animate-wave-intro flex-col items-center px-4 text-center"
+              aria-live="polite"
+            >
+              <p className="text-xs tracking-[0.3em] text-ember uppercase">Волна {intro.wave}</p>
+              <p className="mt-1 font-display text-4xl leading-none text-gold drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)] sm:text-6xl">
+                {intro.text}
+              </p>
+            </div>
+          )}
           {hud.paused && !ended && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-bg/35">
               <p className="font-display text-4xl text-gold">Пауза</p>
@@ -194,7 +211,7 @@ export function GameApp() {
                 type="button"
                 data-testid="call-wave"
                 onClick={sim.callWave}
-                className="inline-flex min-h-11 items-center justify-center rounded-full bg-gold px-5 py-2.5 text-sm font-semibold text-bg"
+                className="inline-flex min-h-11 animate-call-glow items-center justify-center rounded-full bg-gold px-5 py-2.5 text-sm font-semibold text-bg"
               >
                 {hud.earlyBonus > 0 ? `Вызвать волну · +${hud.earlyBonus}` : "Вызвать волну"}
               </button>
@@ -287,6 +304,41 @@ export function GameApp() {
   );
 }
 
+/** Титр волны на пару секунд после её начала. */
+function useWaveIntro(phase: string, wave: number) {
+  const [intro, setIntro] = useState<{ wave: number; text: string; key: number } | null>(null);
+  useEffect(() => {
+    if (phase !== "combat") return;
+    setIntro({ wave, text: dimonShout(wave), key: Date.now() });
+    const timer = window.setTimeout(() => setIntro(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [phase, wave]);
+  return intro;
+}
+
+/** Число плавно догоняет цель — золото «набегает», а не прыгает. */
+function useTweened(target: number) {
+  const [shown, setShown] = useState(target);
+  const shownRef = useRef(target);
+  useEffect(() => {
+    let frame = 0;
+    const step = () => {
+      const diff = target - shownRef.current;
+      if (Math.abs(diff) < 1) {
+        shownRef.current = target;
+        setShown(target);
+        return;
+      }
+      shownRef.current += diff * 0.2;
+      setShown(Math.round(shownRef.current));
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target]);
+  return shown;
+}
+
 function PrepTimer({ left }: { left: number | null }) {
   if (left === null) {
     return (
@@ -368,18 +420,20 @@ function Stat({
   label,
   value,
   tone,
+  pulse,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
   tone: string;
+  pulse?: number;
 }) {
   return (
     <div
       className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 sm:px-3"
       aria-label={`${label}: ${value}`}
     >
-      <Icon className={cx("size-4", tone)} aria-hidden="true" />
+      <Icon key={pulse} className={cx("size-4 animate-stat-pop", tone)} aria-hidden="true" />
       <span className={cx("text-sm font-semibold tabular-nums", tone)}>{value}</span>
     </div>
   );

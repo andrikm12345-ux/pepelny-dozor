@@ -20,7 +20,6 @@ import {
   type WaveEntry,
 } from "./balance";
 import { createAudio, type SfxName } from "./audio";
-import { dimonShout } from "./dimon";
 
 const SAVE_KEY = "pepelny-dozor-v1";
 
@@ -77,6 +76,8 @@ export interface Tower {
   target: TargetMode;
   angle: number;
   recoil: number;
+  /** world.anim в момент постройки — для анимации появления. */
+  born: number;
 }
 
 export interface Shot {
@@ -118,12 +119,45 @@ export interface Floater {
   color: string;
 }
 
+/** Расходящееся кольцо: ударная волна, иней. */
+export interface Ring {
+  x: number;
+  y: number;
+  from: number;
+  to: number;
+  life: number;
+  max: number;
+  color: string;
+}
+
+/** Пепельный след на земле после смерти твари. */
+export interface Decal {
+  x: number;
+  y: number;
+  size: number;
+  life: number;
+  max: number;
+}
+
+/** Короткая вспышка света. */
+export interface Flash {
+  x: number;
+  y: number;
+  radius: number;
+  color: string;
+  life: number;
+  max: number;
+}
+
 export interface World {
   towers: Tower[];
   enemies: Creep[];
   shots: Shot[];
   particles: Particle[];
   floaters: Floater[];
+  rings: Ring[];
+  decals: Decal[];
+  flashes: Flash[];
   hoverCol: number;
   hoverRow: number;
   build: TowerKind | null;
@@ -247,6 +281,9 @@ export function createSim(): Sim {
     shots: [],
     particles: [],
     floaters: [],
+    rings: [],
+    decals: [],
+    flashes: [],
     hoverCol: -1,
     hoverRow: -1,
     build: null,
@@ -308,6 +345,7 @@ export function createSim(): Sim {
   }
 
   function emit() {
+    audio.setMood(phase === "combat" ? "battle" : "calm");
     world.phase = phase;
     world.build = build;
     world.selectedId = selectedId;
@@ -371,6 +409,21 @@ export function createSim(): Sim {
     if (world.floaters.length > 30) world.floaters.shift();
   }
 
+  function addRing(x: number, y: number, from: number, to: number, color: string, life: number) {
+    world.rings.push({ x, y, from, to, color, life, max: life });
+    if (world.rings.length > 40) world.rings.shift();
+  }
+
+  function addDecal(x: number, y: number, size: number) {
+    world.decals.push({ x, y, size, life: 9, max: 9 });
+    if (world.decals.length > 60) world.decals.shift();
+  }
+
+  function addFlash(x: number, y: number, radius: number, color: string, life: number) {
+    world.flashes.push({ x, y, radius, color, life, max: life });
+    if (world.flashes.length > 80) world.flashes.shift();
+  }
+
   function syncCombat() {
     let alive = 0;
     for (const enemy of world.enemies) if (enemy.alive) alive++;
@@ -388,7 +441,14 @@ export function createSim(): Sim {
     killed++;
     float(enemy.x, enemy.y - 0.2, `+${enemy.gold}`, "#e2b15a");
     burst(enemy.x, enemy.y, enemy.color, enemy.kind === "boss" ? 18 : 8, enemy.kind === "boss" ? 2.2 : 1.3);
-    if (enemy.kind === "boss") world.shake = Math.min(1, world.shake + 0.65);
+    addDecal(enemy.x, enemy.y, enemy.scale);
+    addFlash(enemy.x, enemy.y, 1.3, enemy.color, 0.3);
+    if (enemy.kind === "boss") {
+      world.shake = Math.min(1, world.shake + 0.65);
+      addRing(enemy.x, enemy.y, 0.3, 3.2, "#e2b15a", 0.8);
+      addFlash(enemy.x, enemy.y, 4, "#ffb35a", 0.7);
+      sfx("boom");
+    }
     sfx("coin");
     dirty = true;
   }
@@ -403,6 +463,7 @@ export function createSim(): Sim {
       world.hurt = 1;
       const gate = WAYPOINTS[WAYPOINTS.length - 1]!;
       float(gate.x, gate.y - 0.4, "−1", "#e25b3a");
+      addFlash(gate.x, gate.y, 2.4, "#e25b3a", 0.5);
       sfx("leak");
       if (lives <= 0) {
         phase = "defeat";
@@ -421,6 +482,7 @@ export function createSim(): Sim {
     if (enemy.armor < 1 && !shot.pierce) amount *= enemy.armor;
     enemy.hp -= amount;
     enemy.flash = 0.14;
+    if (shot.kind === "ballista") float(enemy.x, enemy.y - 0.45, `${Math.round(amount)}`, "#ffd88a");
     if (shot.slow > 0 && shot.slowTime > 0) {
       if (enemy.slowT <= 0 || shot.slow < enemy.slow) enemy.slow = shot.slow;
       enemy.slowT = Math.max(enemy.slowT, shot.slowTime);
@@ -441,6 +503,16 @@ export function createSim(): Sim {
       if (dx * dx + dy * dy <= r2) hurtEnemy(enemy, shot);
     }
     burst(x, y, shot.color, shot.splash > 0 ? 12 : 5, shot.splash > 0 ? 1.8 : 1);
+    if (shot.splash > 0) {
+      addRing(x, y, 0.15, shot.splash, "#ff8a4a", 0.45);
+      addFlash(x, y, 2.2, "#ff8a4a", 0.35);
+      sfx("boom");
+    } else if (shot.slow > 0) {
+      addRing(x, y, 0.1, 0.55, "#cfe7f0", 0.35);
+      addFlash(x, y, 0.9, "#9ec4d4", 0.2);
+    } else {
+      addFlash(x, y, shot.kind === "ballista" ? 1.2 : 0.6, shot.color, 0.15);
+    }
   }
 
   function spawn(kind: EnemyKind) {
@@ -474,6 +546,14 @@ export function createSim(): Sim {
     };
     world.enemies.push(enemy);
     byId.set(enemy.id, enemy);
+    if (kind === "boss") {
+      world.shake = Math.min(1, world.shake + 0.8);
+      addFlash(origin.x, origin.y, 3, "#e25b3a", 0.8);
+      sfx("boss");
+      banner = "Таран вышел на тропу";
+      bannerT = 3;
+      dirty = true;
+    }
   }
 
   function beginWave(immediate: boolean, bonus = 0) {
@@ -491,8 +571,8 @@ export function createSim(): Sim {
     combatLeft = queue.length;
     spawnGap = queue[0]?.gap ?? 0;
     phase = "combat";
-    banner = bonus > 0 ? `${dimonShout(waveIndex + 1)} · +${bonus}` : dimonShout(waveIndex + 1);
-    bannerT = 2.2;
+    banner = bonus > 0 ? `+${bonus} золота за спешку` : "";
+    bannerT = bonus > 0 ? 2.2 : 0;
     sfx("wave");
     dirty = true;
     if (immediate) flush();
@@ -528,6 +608,9 @@ export function createSim(): Sim {
     world.shots = [];
     world.particles = [];
     world.floaters = [];
+    world.rings = [];
+    world.decals = [];
+    world.flashes = [];
     occ.clear();
     byId.clear();
     queue = [];
@@ -590,6 +673,7 @@ export function createSim(): Sim {
     tower.recoil = 1;
     const sx = tower.col + 0.5;
     const sy = tower.row + 0.5;
+    addFlash(sx + Math.cos(tower.angle) * 0.45, sy + Math.sin(tower.angle) * 0.45, 0.9, def.shot, 0.12);
     world.shots.push({
       x: sx,
       y: sy,
@@ -769,6 +853,12 @@ export function createSim(): Sim {
     if (world.floaters.some((floater) => floater.life <= 0)) {
       world.floaters = world.floaters.filter((floater) => floater.life > 0);
     }
+    for (const item of world.rings) item.life -= dt;
+    for (const item of world.decals) item.life -= dt;
+    for (const item of world.flashes) item.life -= dt;
+    if (world.rings.some((item) => item.life <= 0)) world.rings = world.rings.filter((item) => item.life > 0);
+    if (world.decals.some((item) => item.life <= 0)) world.decals = world.decals.filter((item) => item.life > 0);
+    if (world.flashes.some((item) => item.life <= 0)) world.flashes = world.flashes.filter((item) => item.life > 0);
   }
 
   function place(col: number, row: number) {
@@ -804,6 +894,7 @@ export function createSim(): Sim {
       target: "first",
       angle: -Math.PI / 2,
       recoil: 0,
+      born: world.anim,
     };
     world.towers.push(tower);
     occ.set(key, tower.id);
