@@ -327,3 +327,59 @@ export function wavePreview(index: number): WaveEntry[] {
     count,
   }));
 }
+
+export type Difficulty = "easy" | "normal" | "hard";
+
+export interface DifficultyDef {
+  id: Difficulty;
+  label: string;
+  blurb: string;
+  gold: number;
+  lives: number;
+  hp: number;
+}
+
+export const DIFFICULTY_ORDER: Difficulty[] = ["easy", "normal", "hard"];
+
+export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
+  easy: {
+    id: "easy",
+    label: "Лёгкий",
+    blurb: "Больше золота и жизней, твари хлипче.",
+    gold: 240,
+    lives: 25,
+    hp: 0.8,
+  },
+  normal: {
+    id: "normal",
+    label: "Обычный",
+    blurb: "Ночь, как её помнит Димон.",
+    gold: START_GOLD,
+    lives: START_LIVES,
+    hp: 1,
+  },
+  hard: {
+    id: "hard",
+    label: "Димон не спит",
+    blurb: "Мало жизней, твари толще. Каждая башня на счету.",
+    gold: 200,
+    lives: 12,
+    hp: 1.2,
+  },
+};
+
+export interface TowerTrait {
+  label: string;
+  bad?: boolean;
+}
+
+/** Короткие бейджи: кого башня достаёт и чем особенна. */
+export function towerTraits(def: TowerDef): TowerTrait[] {
+  const traits: TowerTrait[] = [];
+  traits.push(def.hitsFlying ? { label: "земля и воздух" } : { label: "только земля", bad: true });
+  if (def.splash > 0) traits.push({ label: "по площади" });
+  if (def.slow > 0) traits.push({ label: "замедляет" });
+  if (def.pierce) traits.push({ label: "пробивает броню" });
+  else traits.push({ label: "броня гасит урон", bad: true });
+  return traits;
+}

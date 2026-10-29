@@ -1,10 +1,9 @@
 import {
+  DIFFICULTIES,
   ENEMIES,
   MAX_RANK,
   PREP_SECONDS,
   SELL_RATIO,
-  START_GOLD,
-  START_LIVES,
   TOWERS,
   WAVES,
   WAYPOINTS,
@@ -14,6 +13,7 @@ import {
   rateMult,
   upgradeCost,
   wavePreview,
+  type Difficulty,
   type EnemyKind,
   type TargetMode,
   type TowerKind,
@@ -23,6 +23,22 @@ import { createAudio, type SfxName } from "./audio";
 import { dimonShout } from "./dimon";
 
 const SAVE_KEY = "pepelny-dozor-v1";
+
+type PerDifficulty = Record<Difficulty, number>;
+
+function perDifficulty(): PerDifficulty {
+  return { easy: 0, normal: 0, hard: 0 };
+}
+
+function readPer(value: unknown): PerDifficulty {
+  const out = perDifficulty();
+  if (!value || typeof value !== "object") return out;
+  for (const key of Object.keys(out) as Difficulty[]) {
+    const n = (value as Record<string, unknown>)[key];
+    if (typeof n === "number" && Number.isFinite(n)) out[key] = n;
+  }
+  return out;
+}
 
 export type Phase = "menu" | "prep" | "combat" | "victory" | "defeat";
 
@@ -146,6 +162,8 @@ export interface Hud {
   cleared: number;
   bestWave: number;
   wins: number;
+  difficulty: Difficulty;
+  livesTotal: number;
   paused: boolean;
   speed: 1 | 2;
   muted: boolean;
@@ -166,6 +184,7 @@ export interface Sim {
   loadProgress(): void;
   start(): void;
   restart(): void;
+  setDifficulty(difficulty: Difficulty): void;
   togglePause(): void;
   toggleSpeed(): void;
   toggleMute(): void;
@@ -196,14 +215,15 @@ export function createSim(): Sim {
 
   let nextId = 1;
   let phase: Phase = "menu";
-  let gold = START_GOLD;
-  let lives = START_LIVES;
+  let difficulty: Difficulty = "normal";
+  let gold = DIFFICULTIES[difficulty].gold;
+  let lives = DIFFICULTIES[difficulty].lives;
   let waveIndex = 0;
   let cleared = 0;
   let killed = 0;
   let leaked = 0;
-  let bestWave = 0;
-  let wins = 0;
+  let best = perDifficulty();
+  let winsBy = perDifficulty();
   let paused = false;
   let speed: 1 | 2 = 1;
   let muted = false;
@@ -270,8 +290,10 @@ export function createSim(): Sim {
       killed,
       leaked,
       cleared,
-      bestWave,
-      wins,
+      bestWave: best[difficulty],
+      wins: winsBy[difficulty],
+      difficulty,
+      livesTotal: DIFFICULTIES[difficulty].lives,
       paused,
       speed,
       muted,
@@ -309,14 +331,18 @@ export function createSim(): Sim {
   }
 
   function noteBest() {
-    if (cleared > bestWave) bestWave = cleared;
+    if (cleared > best[difficulty]) best[difficulty] = cleared;
   }
 
   function save() {
     noteBest();
+    persist();
+  }
+
+  function persist() {
     if (typeof localStorage === "undefined") return;
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ bestWave, wins, v: 1 }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, best, wins: winsBy, difficulty }));
     } catch {
       /* private mode */
     }
@@ -392,10 +418,7 @@ export function createSim(): Sim {
 
   function hurtEnemy(enemy: Creep, shot: Shot) {
     let amount = shot.damage;
-    if (enemy.armor < 1 && !shot.pierce) {
-      const factor = shot.splash > 0 ? Math.max(enemy.armor, 0.7) : enemy.armor;
-      amount *= factor;
-    }
+    if (enemy.armor < 1 && !shot.pierce) amount *= enemy.armor;
     enemy.hp -= amount;
     enemy.flash = 0.14;
     if (shot.slow > 0 && shot.slowTime > 0) {
@@ -422,6 +445,7 @@ export function createSim(): Sim {
 
   function spawn(kind: EnemyKind) {
     const def = ENEMIES[kind];
+    const hp = Math.round(def.hp * DIFFICULTIES[difficulty].hp);
     const origin = WAYPOINTS[0]!;
     const next = WAYPOINTS[1] ?? origin;
     const ang = Math.atan2(next.y - origin.y, next.x - origin.x);
@@ -433,8 +457,8 @@ export function createSim(): Sim {
       y: origin.y + Math.sin(ang + Math.PI / 2) * side,
       wpi: 1,
       travel: 0,
-      hp: def.hp,
-      maxHp: def.hp,
+      hp,
+      maxHp: hp,
       speed: def.speed,
       gold: def.gold,
       armor: def.armor,
@@ -483,7 +507,7 @@ export function createSim(): Sim {
       phase = "victory";
       banner = "Димон устоял";
       bannerT = 4;
-      wins += 1;
+      winsBy[difficulty] += 1;
       sfx("win");
       save();
     } else {
@@ -507,8 +531,8 @@ export function createSim(): Sim {
     occ.clear();
     byId.clear();
     queue = [];
-    gold = START_GOLD;
-    lives = START_LIVES;
+    gold = DIFFICULTIES[difficulty].gold;
+    lives = DIFFICULTIES[difficulty].lives;
     waveIndex = 0;
     cleared = 0;
     killed = 0;
@@ -818,9 +842,28 @@ export function createSim(): Sim {
       try {
         const raw = localStorage.getItem(SAVE_KEY);
         if (!raw) return;
-        const parsed = JSON.parse(raw) as { bestWave?: number; wins?: number };
-        if (typeof parsed.bestWave === "number") bestWave = parsed.bestWave;
-        if (typeof parsed.wins === "number") wins = parsed.wins;
+        const parsed = JSON.parse(raw) as {
+          v?: number;
+          bestWave?: number;
+          wins?: unknown;
+          best?: unknown;
+          difficulty?: unknown;
+        };
+        if (parsed.v === 2) {
+          best = readPer(parsed.best);
+          winsBy = readPer(parsed.wins);
+          if (typeof parsed.difficulty === "string" && parsed.difficulty in DIFFICULTIES) {
+            difficulty = parsed.difficulty as Difficulty;
+          }
+        } else {
+          // v1 хранил один рекорд — это был обычный режим.
+          if (typeof parsed.bestWave === "number") best.normal = parsed.bestWave;
+          if (typeof parsed.wins === "number") winsBy.normal = parsed.wins;
+        }
+        if (phase === "menu") {
+          gold = DIFFICULTIES[difficulty].gold;
+          lives = DIFFICULTIES[difficulty].lives;
+        }
         flush();
       } catch {
         /* ignore */
@@ -834,6 +877,17 @@ export function createSim(): Sim {
     restart() {
       audio.unlock();
       resetBoard();
+      flush();
+    },
+    setDifficulty(next) {
+      if (phase !== "menu" && phase !== "victory" && phase !== "defeat") return;
+      if (next === difficulty) return;
+      difficulty = next;
+      if (phase === "menu") {
+        gold = DIFFICULTIES[difficulty].gold;
+        lives = DIFFICULTIES[difficulty].lives;
+      }
+      persist();
       flush();
     },
     togglePause() {

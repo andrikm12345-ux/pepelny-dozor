@@ -14,11 +14,16 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  DIFFICULTIES,
+  DIFFICULTY_ORDER,
   MAX_RANK,
-  START_LIVES,
+  PREP_SECONDS,
   TARGETS,
   TOWER_ORDER,
   TOWERS,
+  towerTraits,
+  type Difficulty,
+  type TowerDef,
   type TowerKind,
 } from "@/game/balance";
 import { boardLayout, render } from "@/game/draw";
@@ -183,7 +188,8 @@ export function GameApp() {
             </div>
           )}
           {hud.phase === "prep" && (
-            <div className="absolute inset-x-0 bottom-3 flex justify-center px-3">
+            <div className="absolute inset-x-0 bottom-3 flex flex-col items-center gap-2 px-3">
+              <PrepTimer left={hud.prepLeft} />
               <button
                 type="button"
                 data-testid="call-wave"
@@ -259,6 +265,7 @@ export function GameApp() {
                         <span className="tabular-nums text-gold">{def.cost}</span>
                       </span>
                       <span className="mt-0.5 block text-xs leading-snug text-muted">{def.blurb}</span>
+                      <Traits def={def} />
                     </span>
                   </button>
                 );
@@ -268,8 +275,72 @@ export function GameApp() {
         </aside>
       </div>
 
-      {ended && <EndScreen hud={hud} onStart={sim.start} onRestart={sim.restart} />}
+      {ended && (
+        <EndScreen
+          hud={hud}
+          onStart={sim.start}
+          onRestart={sim.restart}
+          onDifficulty={sim.setDifficulty}
+        />
+      )}
     </div>
+  );
+}
+
+function PrepTimer({ left }: { left: number | null }) {
+  if (left === null) {
+    return (
+      <p className="rounded-full border border-line bg-bg/85 px-3 py-1 text-xs text-muted">
+        Расставь башни. Волна ждёт твоего слова
+      </p>
+    );
+  }
+  const shown = Math.max(0, Math.ceil(left));
+  const pct = Math.max(0, Math.min(1, left / PREP_SECONDS));
+  return (
+    <div
+      className="flex items-center gap-2 rounded-full border border-line bg-bg/85 py-1 pr-3 pl-1.5"
+      role="timer"
+      aria-label={`Волна через ${shown} с`}
+    >
+      <span className="relative inline-flex size-7 items-center justify-center">
+        <svg viewBox="0 0 28 28" className="absolute inset-0 -rotate-90" aria-hidden="true">
+          <circle cx="14" cy="14" r="12" fill="none" stroke="var(--color-line)" strokeWidth="3" />
+          <circle
+            cx="14"
+            cy="14"
+            r="12"
+            fill="none"
+            stroke="var(--color-gold)"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={2 * Math.PI * 12}
+            strokeDashoffset={2 * Math.PI * 12 * (1 - pct)}
+            className="transition-[stroke-dashoffset] duration-1000 ease-linear"
+          />
+        </svg>
+        <span className="relative text-xs font-semibold tabular-nums text-gold">{shown}</span>
+      </span>
+      <span className="text-xs text-fg">Волна пойдёт сама</span>
+    </div>
+  );
+}
+
+function Traits({ def }: { def: TowerDef }) {
+  return (
+    <span className="mt-1.5 flex flex-wrap gap-1">
+      {towerTraits(def).map((trait) => (
+        <span
+          key={trait.label}
+          className={cx(
+            "rounded-full border px-1.5 py-px text-[11px] leading-4",
+            trait.bad ? "border-ember/40 text-ember" : "border-moss/40 text-moss",
+          )}
+        >
+          {trait.label}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -350,6 +421,7 @@ function Inspector({ hud, sim }: { hud: Hud; sim: Sim }) {
           <p className="mt-1 text-xs leading-snug text-muted">{selection.blurb}</p>
         </div>
       </div>
+      <Traits def={TOWERS[selection.kind]} />
       <p className="mt-3 text-sm text-fg">
         Урон {selection.damage}
         <span className="text-muted"> · </span>
@@ -441,7 +513,17 @@ function Upgrade({
   );
 }
 
-function EndScreen({ hud, onStart, onRestart }: { hud: Hud; onStart: () => void; onRestart: () => void }) {
+function EndScreen({
+  hud,
+  onStart,
+  onRestart,
+  onDifficulty,
+}: {
+  hud: Hud;
+  onStart: () => void;
+  onRestart: () => void;
+  onDifficulty: (difficulty: Difficulty) => void;
+}) {
   const victory = hud.phase === "victory";
   const defeat = hud.phase === "defeat";
   return (
@@ -467,16 +549,38 @@ function EndScreen({ hud, onStart, onRestart }: { hud: Hud; onStart: () => void;
             <li>Досрочный вызов волны даёт остаток золота.</li>
           </ul>
         )}
+        <div className="mt-5">
+          <p className="mb-1.5 text-xs tracking-[0.16em] text-muted uppercase">Сложность</p>
+          <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="Сложность">
+            {DIFFICULTY_ORDER.map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={hud.difficulty === id}
+                data-testid={`difficulty-${id}`}
+                onClick={() => onDifficulty(id)}
+                className={cx(
+                  "min-h-11 rounded-xl border px-1 text-xs leading-tight font-semibold",
+                  hud.difficulty === id ? "border-gold bg-gold text-bg" : "border-line bg-bg text-fg",
+                )}
+              >
+                {DIFFICULTIES[id].label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-muted">{DIFFICULTIES[hud.difficulty].blurb}</p>
+        </div>
         <button
           type="button"
           data-testid="restart"
           onClick={victory || defeat ? onRestart : onStart}
-          className="mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-gold px-5 text-base font-semibold text-bg"
+          className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-gold px-5 text-base font-semibold text-bg"
         >
           {victory || defeat ? "Сыграть снова" : "Встать за Димона"}
         </button>
         <p className="mt-3 text-xs text-muted">
-          {START_LIVES} жизней · {hud.wavesTotal} волн
+          {hud.livesTotal} жизней · {DIFFICULTIES[hud.difficulty].gold} золота · {hud.wavesTotal} волн
           {hud.bestWave > 0 ? ` · лучшая волна ${hud.bestWave}` : ""}
           {hud.wins > 0 ? ` · побед ${hud.wins}` : ""}
         </p>
