@@ -1,5 +1,5 @@
-import { COLS, ROWS, TOWERS, gateOf, isRoad, type GameMap, type Waypoint } from "./balance";
-import type { Creep, Shot, Tower, World } from "./sim";
+import { ABILITY_RADIUS, COLS, ROWS, TOWERS, gateOf, isRoad, type GameMap, type Waypoint } from "./balance";
+import type { Bolt, Creep, Shot, Tower, World } from "./sim";
 
 export interface Board {
   cell: number;
@@ -440,6 +440,7 @@ export function createRenderer(): Renderer {
     for (const enemy of ordered) drawEnemy(ctx, enemy, board, sprites, anim);
 
     drawShots(ctx, world, board);
+    for (const bolt of world.bolts) drawBolt(ctx, bolt, board);
 
     for (const ring of world.rings) {
       const t = 1 - clamp01(ring.life / ring.max);
@@ -546,6 +547,18 @@ export function createRenderer(): Renderer {
     ctx.beginPath();
     ctx.ellipse(x, y + cell * 0.36, cell * 0.36 * grow, cell * 0.12 * grow, 0, 0, Math.PI * 2);
     ctx.fill();
+    if (def.aura > 0) {
+      ctx.strokeStyle = def.shot;
+      ctx.globalAlpha = 0.22 + Math.sin(world.anim * 2) * 0.06;
+      ctx.lineWidth = Math.max(1, cell * 0.04);
+      ctx.setLineDash([cell * 0.2, cell * 0.2]);
+      ctx.lineDashOffset = -world.anim * cell * 0.15;
+      ctx.beginPath();
+      ctx.arc(x, y, def.aura * cell, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
     if (ranks > 0) {
       ctx.strokeStyle = def.shot;
       ctx.globalAlpha = 0.2 + ranks * 0.1;
@@ -561,17 +574,19 @@ export function createRenderer(): Renderer {
     }
 
     // ствол смотрит на цель
-    const ax = bx + Math.cos(tower.angle) * cell * 0.46;
-    const ay = by + Math.sin(tower.angle) * cell * 0.46;
-    ctx.strokeStyle = def.shot;
-    ctx.globalAlpha = 0.9;
-    ctx.lineWidth = Math.max(2, cell * 0.06);
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(bx + Math.cos(tower.angle) * cell * 0.18, by + Math.sin(tower.angle) * cell * 0.18);
-    ctx.lineTo(ax, ay);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+    if (def.damage > 0 && tower.kind !== "tesla") {
+      const ax = bx + Math.cos(tower.angle) * cell * 0.46;
+      const ay = by + Math.sin(tower.angle) * cell * 0.46;
+      ctx.strokeStyle = def.shot;
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = Math.max(2, cell * 0.06);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(bx + Math.cos(tower.angle) * cell * 0.18, by + Math.sin(tower.angle) * cell * 0.18);
+      ctx.lineTo(ax, ay);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
 
     // уровни: золотые — урон, голубые — скорострельность
     const pip = Math.max(2, cell * 0.06);
@@ -607,6 +622,12 @@ export function createRenderer(): Renderer {
     ctx.ellipse(x, groundY + size * 0.32, size * 0.26, size * 0.09, 0, 0, Math.PI * 2);
     ctx.fill();
 
+    if (enemy.kind === "healer") {
+      ctx.globalCompositeOperation = "lighter";
+      blot(ctx, "rgba(125, 255, 150, 1)", x, y, size * 0.75, 0.28 + Math.sin(anim * 5 + enemy.id) * 0.1);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
     if (enemy.kind === "boss") {
       ctx.globalCompositeOperation = "lighter";
       blot(ctx, "rgba(226, 91, 58, 1)", x, y, size * 0.9, 0.35 + Math.sin(anim * 4) * 0.12);
@@ -662,6 +683,47 @@ export function createRenderer(): Renderer {
     ctx.fillStyle = pct > 0.45 ? "#7eae8a" : pct > 0.2 ? "#e2b15a" : "#e25b3a";
     round(ctx, bx, by, Math.max(h, w * pct), h, h);
     ctx.fill();
+  }
+
+  /** Молния: рваная ломаная, которая мерцает, пока гаснет. */
+  function drawBolt(ctx: CanvasRenderingContext2D, bolt: Bolt, { cell, ox, oy }: Board) {
+    const fade = clamp01(bolt.life / bolt.max);
+    const frame = Math.floor(bolt.life * 60);
+    const path: Pt[] = [];
+    for (let i = 0; i < bolt.pts.length - 1; i++) {
+      const a = bolt.pts[i]!;
+      const b = bolt.pts[i + 1]!;
+      const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const nx = -(b.y - a.y) / len;
+      const ny = (b.x - a.x) / len;
+      const steps = Math.max(2, Math.round(len * 3));
+      for (let k = 0; k < steps; k++) {
+        const t = k / steps;
+        const edge = k === 0 ? 0 : (hash(i * 11 + k, frame, 51) - 0.5) * 0.32;
+        path.push({
+          x: ox + (a.x + (b.x - a.x) * t + nx * edge) * cell,
+          y: oy + (a.y + (b.y - a.y) * t + ny * edge) * cell,
+        });
+      }
+    }
+    const end = bolt.pts[bolt.pts.length - 1]!;
+    path.push({ x: ox + end.x * cell, y: oy + end.y * cell });
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    const layers: Array<[number, string, number]> = [
+      [cell * 0.2, "rgb(70, 150, 255)", 0.3],
+      [cell * 0.07, "rgb(190, 235, 255)", 0.9],
+      [cell * 0.025, "rgb(255, 255, 255)", 1],
+    ];
+    for (const [width, color, alpha] of layers) {
+      ctx.globalAlpha = alpha * fade;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1, width);
+      strokePath(ctx, path);
+    }
+    ctx.restore();
   }
 
   function drawShots(ctx: CanvasRenderingContext2D, world: World, board: Board) {
@@ -788,7 +850,7 @@ export function createRenderer(): Renderer {
       const { x, y } = towerCenter(tower, board);
       const def = TOWERS[tower.kind];
       const flicker = tower.kind === "ember" ? 0.08 * Math.sin(anim * 9 + tower.id) : 0;
-      const reach = tower.kind === "ember" ? 2.1 : tower.kind === "frost" ? 1.8 : 1.4;
+      const reach = tower.kind === "ember" ? 2.1 : tower.kind === "frost" || tower.kind === "tesla" ? 1.8 : 1.4;
       lights.push([def.shot, x, y, cell * (reach + flicker + tower.recoil * 0.3), 0.32 + (tower.dmgRank + tower.rateRank) * 0.03]);
     }
     for (const enemy of world.enemies) {
@@ -841,7 +903,56 @@ export function createRenderer(): Renderer {
       const def = TOWERS[world.build];
       rangeRing(ctx, board, world.hoverCol, world.hoverRow, def.range, open ? def.shot : "#e25b3a", open);
     }
-    if (world.hoverCol >= 0 && world.hoverRow >= 0) {
+    for (const strike of world.strikes) {
+      const k = 1 - clamp01(strike.t / strike.max);
+      const x = ox + strike.x * cell;
+      const y = oy + strike.y * cell;
+      const r = ABILITY_RADIUS * cell;
+      ctx.fillStyle = `rgba(226, 91, 58, ${0.1 + 0.2 * k})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(226, 91, 58, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, r * (1 - 0.75 * k), 0, Math.PI * 2);
+      ctx.stroke();
+      // камень падает сверху и растёт
+      const drop = (1 - k) * cell * 3.2;
+      ctx.fillStyle = "#3a332c";
+      ctx.strokeStyle = "#8a7a68";
+      ctx.beginPath();
+      ctx.arc(x, y - drop, cell * (0.28 + 0.18 * k), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    if (world.aiming && world.hoverFx >= 0) {
+      const x = ox + world.hoverFx * cell;
+      const y = oy + world.hoverFy * cell;
+      const r = ABILITY_RADIUS * cell;
+      ctx.fillStyle = "rgba(226, 91, 58, 0.1)";
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 150, 110, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 7]);
+      ctx.lineDashOffset = -world.anim * 18;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(x - cell * 0.35, y);
+      ctx.lineTo(x + cell * 0.35, y);
+      ctx.moveTo(x, y - cell * 0.35);
+      ctx.lineTo(x, y + cell * 0.35);
+      ctx.stroke();
+    }
+    if (world.hoverCol >= 0 && world.hoverRow >= 0 && !world.aiming) {
       ctx.strokeStyle = "rgba(226, 177, 90, 0.9)";
       ctx.lineWidth = 1.5;
       round(ctx, ox + world.hoverCol * cell + gap, oy + world.hoverRow * cell + gap, cell - gap * 2, cell - gap * 2, radius);

@@ -1,6 +1,17 @@
 import {
+  ABILITY_COOLDOWN,
+  ABILITY_DELAY,
+  ABILITY_RADIUS,
+  BANNER_DMG,
+  BANNER_MAX,
+  BANNER_RATE,
+  CHAIN_FALLOFF,
+  CHAIN_REACH,
   DIFFICULTIES,
   ENEMIES,
+  HEAL_EVERY,
+  HEAL_FRACTION,
+  HEAL_RADIUS,
   MAX_RANK,
   PREP_SECONDS,
   SELL_RATIO,
@@ -8,6 +19,7 @@ import {
   MAPS,
   MAP_ORDER,
   WAVES,
+  abilityDamage,
   dmgMult,
   gateOf,
   getMap,
@@ -29,6 +41,40 @@ import {
 import { createAudio, type SfxName } from "./audio";
 
 const SAVE_KEY = "pepelny-dozor-v1";
+const RUN_KEY = "pepelny-dozor-run-v1";
+
+/** Забег между волнами: достаточно, чтобы продолжить с места. */
+interface SavedRun {
+  v: 1;
+  map: MapId;
+  difficulty: Difficulty;
+  endless: boolean;
+  cheated: boolean;
+  wave: number;
+  gold: number;
+  lives: number;
+  cleared: number;
+  killed: number;
+  leaked: number;
+  abilityCd: number;
+  towers: Array<{
+    kind: TowerKind;
+    col: number;
+    row: number;
+    dmgRank: number;
+    rateRank: number;
+    spent: number;
+    target: TargetMode;
+  }>;
+}
+
+export interface RunSummary {
+  wave: number;
+  mapId: MapId;
+  difficulty: Difficulty;
+  endless: boolean;
+  towers: number;
+}
 
 type PerDifficulty = Record<Difficulty, number>;
 type PerMap = Record<MapId, PerDifficulty>;
@@ -83,6 +129,8 @@ export interface Creep {
   alive: boolean;
   vx: number;
   vy: number;
+  /** Секунд до следующего импульса лечения (только у знахарей). */
+  healT: number;
 }
 
 export interface Tower {
@@ -140,6 +188,21 @@ export interface Floater {
   color: string;
 }
 
+/** Молния: ломаная от башни по цепочке тварей. */
+export interface Bolt {
+  pts: Array<{ x: number; y: number }>;
+  life: number;
+  max: number;
+}
+
+/** Обвал Димона, который вот-вот упадёт. */
+export interface Strike {
+  x: number;
+  y: number;
+  t: number;
+  max: number;
+}
+
 /** Расходящееся кольцо: ударная волна, иней. */
 export interface Ring {
   x: number;
@@ -179,9 +242,15 @@ export interface World {
   rings: Ring[];
   decals: Decal[];
   flashes: Flash[];
+  bolts: Bolt[];
+  strikes: Strike[];
   map: GameMap;
   hoverCol: number;
   hoverRow: number;
+  /** Положение курсора в клетках с дробной частью — для прицела обвала. */
+  hoverFx: number;
+  hoverFy: number;
+  aiming: boolean;
   build: TowerKind | null;
   selectedId: number;
   phase: Phase;
@@ -204,6 +273,10 @@ export interface SelectionView {
   damage: number;
   rate: number;
   range: number;
+  /** Башня-усилитель: сама не стреляет. */
+  support: boolean;
+  /** Сколько знамён усиливает эту башню. */
+  buffed: number;
 }
 
 export interface Hud {
@@ -229,6 +302,11 @@ export interface Hud {
   cheat: boolean;
   /** Идёт бесконечная ночь после 12-й волны. */
   endless: boolean;
+  towerCount: number;
+  /** Секунд до готовности обвала; 0 — можно бить. */
+  abilityLeft: number;
+  aiming: boolean;
+  savedRun: RunSummary | null;
   paused: boolean;
   speed: 1 | 2;
   muted: boolean;
@@ -252,6 +330,8 @@ export interface Sim {
   continueEndless(): void;
   setDifficulty(difficulty: Difficulty): void;
   setMap(id: MapId): void;
+  continueRun(): void;
+  toggleAim(): void;
   togglePause(): void;
   toggleSpeed(): void;
   toggleMute(): void;
@@ -262,7 +342,7 @@ export interface Sim {
   upgrade(track: "dmg" | "rate"): void;
   sell(): void;
   callWave(): void;
-  pointer(col: number, row: number, type: "move" | "down" | "leave"): void;
+  pointer(col: number, row: number, type: "move" | "down" | "leave", fx?: number, fy?: number): void;
   frame(realDt: number): void;
   simulate(seconds: number): void;
 }
@@ -298,6 +378,10 @@ export function createSim(): Sim {
   let best = perMap();
   let winsBy = perMap();
   let spawnCount = 0;
+  let abilityCd = 0;
+  let abilityShown = 0;
+  let aiming = false;
+  let savedRun: SavedRun | null = null;
   let paused = false;
   let speed: 1 | 2 = 1;
   let muted = false;
@@ -328,9 +412,14 @@ export function createSim(): Sim {
     rings: [],
     decals: [],
     flashes: [],
+    bolts: [],
+    strikes: [],
     map: getMap(mapId),
     hoverCol: -1,
     hoverRow: -1,
+    hoverFx: -1,
+    hoverFy: -1,
+    aiming: false,
     build: null,
     selectedId: 0,
     phase: "menu",
@@ -341,11 +430,26 @@ export function createSim(): Sim {
 
   let snapshot = assemble();
 
+  /** Сколько знамён (не больше BANNER_MAX) усиливают башню. */
+  function bannersAround(tower: Tower): number {
+    if (TOWERS[tower.kind].aura > 0) return 0;
+    let count = 0;
+    for (const other of world.towers) {
+      const aura = TOWERS[other.kind].aura;
+      if (aura <= 0) continue;
+      const dx = other.col - tower.col;
+      const dy = other.row - tower.row;
+      if (dx * dx + dy * dy <= aura * aura) count++;
+    }
+    return Math.min(count, BANNER_MAX);
+  }
+
   function assemble(): Hud {
     const tower = world.towers.find((item) => item.id === selectedId) ?? null;
     let selection: SelectionView | null = null;
     if (tower) {
       const def = TOWERS[tower.kind];
+      const buffed = bannersAround(tower);
       selection = {
         id: tower.id,
         kind: tower.kind,
@@ -353,13 +457,15 @@ export function createSim(): Sim {
         blurb: def.blurb,
         dmgRank: tower.dmgRank,
         rateRank: tower.rateRank,
-        dmgCost: tower.dmgRank >= MAX_RANK ? null : upgradeCost(def.cost, tower.dmgRank),
-        rateCost: tower.rateRank >= MAX_RANK ? null : upgradeCost(def.cost, tower.rateRank),
+        dmgCost: def.aura > 0 || tower.dmgRank >= MAX_RANK ? null : upgradeCost(def.cost, tower.dmgRank),
+        rateCost: def.aura > 0 || tower.rateRank >= MAX_RANK ? null : upgradeCost(def.cost, tower.rateRank),
         sell: Math.floor(tower.spent * SELL_RATIO),
         target: tower.target,
-        damage: Math.round(def.damage * dmgMult(tower.dmgRank)),
-        rate: Math.round(def.rate * rateMult(tower.rateRank) * 10) / 10,
+        damage: Math.round(def.damage * dmgMult(tower.dmgRank) * (1 + BANNER_DMG * buffed)),
+        rate: Math.round(def.rate * rateMult(tower.rateRank) * (1 + BANNER_RATE * buffed) * 10) / 10,
         range: def.range,
+        support: def.aura > 0,
+        buffed,
       };
     }
     return {
@@ -381,6 +487,18 @@ export function createSim(): Sim {
       mapBest: Object.fromEntries(MAP_ORDER.map((id) => [id, best[id][difficulty]])) as Record<MapId, number>,
       cheat,
       endless,
+      towerCount: world.towers.length,
+      abilityLeft: Math.ceil(abilityCd),
+      aiming,
+      savedRun: savedRun
+        ? {
+            wave: savedRun.wave + 1,
+            mapId: savedRun.map,
+            difficulty: savedRun.difficulty,
+            endless: savedRun.endless,
+            towers: savedRun.towers.length,
+          }
+        : null,
       paused,
       speed,
       muted,
@@ -399,6 +517,7 @@ export function createSim(): Sim {
     world.phase = phase;
     world.build = build;
     world.selectedId = selectedId;
+    world.aiming = aiming;
     snapshot = assemble();
     for (const listener of listeners) listener();
   }
@@ -544,6 +663,7 @@ export function createSim(): Sim {
         banner = "Димон пал";
         bannerT = 3;
         sfx("lose");
+        clearRun();
         save();
       }
     }
@@ -621,6 +741,7 @@ export function createSim(): Sim {
       alive: true,
       vx: 0,
       vy: 0,
+      healT: HEAL_EVERY * Math.random(),
     };
     world.enemies.push(enemy);
     byId.set(enemy.id, enemy);
@@ -666,6 +787,7 @@ export function createSim(): Sim {
       bannerT = 4;
       if (!cheated) winsBy[runMap][runDifficulty] += 1;
       sfx("win");
+      clearRun();
       save();
     } else {
       waveIndex += 1;
@@ -675,6 +797,7 @@ export function createSim(): Sim {
       banner = "Димон выдохнул";
       bannerT = 2;
       save();
+      saveRun();
     }
     dirty = true;
   }
@@ -692,6 +815,11 @@ export function createSim(): Sim {
     runMap = mapId;
     world.map = getMap(runMap);
     spawnCount = 0;
+    abilityCd = 0;
+    abilityShown = 0;
+    aiming = false;
+    world.bolts = [];
+    world.strikes = [];
     occ.clear();
     byId.clear();
     queue = [];
@@ -748,15 +876,237 @@ export function createSim(): Sim {
     return best;
   }
 
+  /** Выстрел-пустышка для урона, который не летит снарядом: молния, обвал. */
+  function plainShot(kind: TowerKind, damage: number, x: number, y: number, color: string, extra: Partial<Shot> = {}): Shot {
+    return {
+      x,
+      y,
+      aimX: x,
+      aimY: y,
+      speed: 0,
+      damage,
+      splash: 0,
+      slow: 0,
+      slowTime: 0,
+      pierce: false,
+      hitsFlying: true,
+      color,
+      kind,
+      targetId: null,
+      life: 0,
+      alive: false,
+      ...extra,
+    };
+  }
+
+  /** Молния: бьёт цель и перескакивает на ближайших, теряя силу на каждом прыжке. */
+  function zap(tower: Tower, first: Creep, damage: number) {
+    const def = TOWERS[tower.kind];
+    const pts = [
+      { x: tower.col + 0.5, y: tower.row + 0.5 },
+      { x: first.x, y: first.y },
+    ];
+    const hit = new Set<number>([first.id]);
+    let current = first;
+    let dmg = damage;
+    hurtEnemy(first, plainShot(tower.kind, dmg, first.x, first.y, def.shot));
+    for (let jump = 0; jump < def.chain; jump++) {
+      let next: Creep | null = null;
+      let bestD = CHAIN_REACH * CHAIN_REACH;
+      for (const enemy of world.enemies) {
+        if (!enemy.alive || hit.has(enemy.id)) continue;
+        const dx = enemy.x - current.x;
+        const dy = enemy.y - current.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD) {
+          bestD = d2;
+          next = enemy;
+        }
+      }
+      if (!next) break;
+      hit.add(next.id);
+      dmg *= CHAIN_FALLOFF;
+      pts.push({ x: next.x, y: next.y });
+      hurtEnemy(next, plainShot(tower.kind, dmg, next.x, next.y, def.shot));
+      current = next;
+    }
+    world.bolts.push({ pts, life: 0.2, max: 0.2 });
+    if (world.bolts.length > 30) world.bolts.shift();
+    for (const pt of pts.slice(1)) addFlash(pt.x, pt.y, 0.9, def.shot, 0.18);
+  }
+
+  /** Знахари лечат раненых соседей короткими импульсами. */
+  function healPulse(dt: number) {
+    for (const healer of world.enemies) {
+      if (!healer.alive || healer.kind !== "healer") continue;
+      healer.healT -= dt;
+      if (healer.healT > 0) continue;
+      healer.healT += HEAL_EVERY;
+      let healed = 0;
+      for (const other of world.enemies) {
+        if (!other.alive || other === healer || other.hp >= other.maxHp) continue;
+        const dx = other.x - healer.x;
+        const dy = other.y - healer.y;
+        if (dx * dx + dy * dy > HEAL_RADIUS * HEAL_RADIUS) continue;
+        const share = other.kind === "boss" ? 0.4 : 1;
+        other.hp = Math.min(other.maxHp, other.hp + other.maxHp * HEAL_FRACTION * share);
+        healed++;
+      }
+      if (healed > 0) {
+        addRing(healer.x, healer.y, 0.2, HEAL_RADIUS, "#7dff96", 0.5);
+        burst(healer.x, healer.y, "#7dff96", 5, 0.8);
+        sfx("heal");
+      }
+    }
+  }
+
+  /** Обвал Димона: сначала предупреждение, потом удар по области. */
+  function updateStrikes(dt: number) {
+    if (!world.strikes.length) return;
+    for (const strike of world.strikes) strike.t -= dt;
+    const landed = world.strikes.filter((strike) => strike.t <= 0);
+    if (!landed.length) return;
+    world.strikes = world.strikes.filter((strike) => strike.t > 0);
+    for (const { x, y } of landed) {
+      const damage = abilityDamage(waveIndex);
+      const r2 = ABILITY_RADIUS * ABILITY_RADIUS;
+      for (const enemy of world.enemies) {
+        if (!enemy.alive) continue;
+        const dx = enemy.x - x;
+        const dy = enemy.y - y;
+        if (dx * dx + dy * dy > r2) continue;
+        hurtEnemy(enemy, plainShot("ballista", damage, x, y, "#e2b15a", { pierce: true, slow: 0.4, slowTime: 2 }));
+      }
+      addRing(x, y, 0.2, ABILITY_RADIUS, "#e2b15a", 0.5);
+      addRing(x, y, 0.1, ABILITY_RADIUS * 0.6, "#ffffff", 0.35);
+      addFlash(x, y, 4.5, "#ffb35a", 0.5);
+      burst(x, y, "#9a8a74", 26, 2.4);
+      burst(x, y, "#e2b15a", 10, 1.6);
+      world.shake = Math.min(1, world.shake + 0.55);
+      sfx("rock");
+    }
+    dirty = true;
+  }
+
+  function castAbility(fx: number, fy: number) {
+    aiming = false;
+    if (phase !== "combat" || paused || abilityCd > 0) {
+      flush();
+      return;
+    }
+    abilityCd = ABILITY_COOLDOWN;
+    abilityShown = Math.ceil(abilityCd);
+    world.strikes.push({ x: fx, y: fy, t: ABILITY_DELAY, max: ABILITY_DELAY });
+    flush();
+  }
+
+  function saveRun() {
+    if (phase !== "prep" || typeof localStorage === "undefined") return;
+    if (waveIndex === 0 && world.towers.length === 0) return;
+    const run: SavedRun = {
+      v: 1,
+      map: runMap,
+      difficulty: runDifficulty,
+      endless,
+      cheated,
+      wave: waveIndex,
+      gold,
+      lives,
+      cleared,
+      killed,
+      leaked,
+      abilityCd,
+      towers: world.towers.map((tower) => ({
+        kind: tower.kind,
+        col: tower.col,
+        row: tower.row,
+        dmgRank: tower.dmgRank,
+        rateRank: tower.rateRank,
+        spent: tower.spent,
+        target: tower.target,
+      })),
+    };
+    savedRun = run;
+    try {
+      localStorage.setItem(RUN_KEY, JSON.stringify(run));
+    } catch {
+      /* private mode */
+    }
+  }
+
+  function clearRun() {
+    savedRun = null;
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.removeItem(RUN_KEY);
+    } catch {
+      /* private mode */
+    }
+  }
+
+  function readRun(): SavedRun | null {
+    try {
+      const raw = localStorage.getItem(RUN_KEY);
+      if (!raw) return null;
+      const r = JSON.parse(raw) as Partial<SavedRun>;
+      if (r.v !== 1 || !r.map || !(r.map in MAPS) || !r.difficulty || !(r.difficulty in DIFFICULTIES)) return null;
+      const num = (value: unknown, fallback = 0) =>
+        typeof value === "number" && Number.isFinite(value) ? value : fallback;
+      const map = getMap(r.map);
+      const seen = new Set<string>();
+      const towers: SavedRun["towers"] = [];
+      for (const t of Array.isArray(r.towers) ? r.towers : []) {
+        if (!t || typeof t.kind !== "string" || !(t.kind in TOWERS)) continue;
+        const col = num(t.col, -1);
+        const row = num(t.row, -1);
+        const key = `${col},${row}`;
+        if (!isInside(col, row) || isRoad(map, col, row) || seen.has(key)) continue;
+        seen.add(key);
+        towers.push({
+          kind: t.kind,
+          col,
+          row,
+          dmgRank: Math.max(0, Math.min(MAX_RANK, num(t.dmgRank))),
+          rateRank: Math.max(0, Math.min(MAX_RANK, num(t.rateRank))),
+          spent: Math.max(0, num(t.spent)),
+          target: ["first", "last", "close", "strong"].includes(t.target) ? t.target : "first",
+        });
+      }
+      return {
+        v: 1,
+        map: r.map,
+        difficulty: r.difficulty,
+        endless: r.endless === true,
+        cheated: r.cheated === true,
+        wave: Math.max(0, Math.floor(num(r.wave))),
+        gold: Math.max(0, num(r.gold)),
+        lives: Math.max(1, num(r.lives, 1)),
+        cleared: Math.max(0, num(r.cleared)),
+        killed: Math.max(0, num(r.killed)),
+        leaked: Math.max(0, num(r.leaked)),
+        abilityCd: Math.max(0, Math.min(ABILITY_COOLDOWN, num(r.abilityCd))),
+        towers,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   function fire(tower: Tower, target: Creep) {
     const def = TOWERS[tower.kind];
-    const damage = def.damage * dmgMult(tower.dmgRank);
-    const rate = def.rate * rateMult(tower.rateRank);
+    const boost = bannersAround(tower);
+    const damage = def.damage * dmgMult(tower.dmgRank) * (1 + BANNER_DMG * boost);
+    const rate = def.rate * rateMult(tower.rateRank) * (1 + BANNER_RATE * boost);
     tower.cooldown += 1 / rate;
     tower.recoil = 1;
     const sx = tower.col + 0.5;
     const sy = tower.row + 0.5;
     addFlash(sx + Math.cos(tower.angle) * 0.45, sy + Math.sin(tower.angle) * 0.45, 0.9, def.shot, 0.12);
+    if (def.chain > 0) {
+      zap(tower, target, damage);
+      sfx(tower.kind);
+      return;
+    }
     world.shots.push({
       x: sx,
       y: sy,
@@ -788,6 +1138,15 @@ export function createSim(): Sim {
       if (bannerT <= 0) dirty = true;
     }
     world.hurt = Math.max(0, world.hurt - dt * 1.6);
+    if (phase === "combat" && abilityCd > 0) {
+      abilityCd = Math.max(0, abilityCd - dt);
+      const shown = Math.ceil(abilityCd);
+      if (shown !== abilityShown) {
+        abilityShown = shown;
+        dirty = true;
+      }
+    }
+    updateStrikes(dt);
     world.shake *= Math.exp(-2.8 * dt);
 
     if (phase === "prep") {
@@ -862,6 +1221,8 @@ export function createSim(): Sim {
       }
     }
 
+    healPulse(dt);
+
     if (phase !== "combat") {
       decayFx(dt);
       syncCombat();
@@ -869,6 +1230,7 @@ export function createSim(): Sim {
     }
 
     for (const tower of world.towers) {
+      if (TOWERS[tower.kind].aura > 0) continue;
       tower.cooldown -= dt;
       if (tower.recoil > 0) tower.recoil = Math.max(0, tower.recoil - dt * 3.2);
       const target = pickTarget(tower);
@@ -937,6 +1299,8 @@ export function createSim(): Sim {
     if (world.floaters.some((floater) => floater.life <= 0)) {
       world.floaters = world.floaters.filter((floater) => floater.life > 0);
     }
+    for (const item of world.bolts) item.life -= dt;
+    if (world.bolts.some((item) => item.life <= 0)) world.bolts = world.bolts.filter((item) => item.life > 0);
     for (const item of world.rings) item.life -= dt;
     for (const item of world.decals) item.life -= dt;
     for (const item of world.flashes) item.life -= dt;
@@ -987,6 +1351,7 @@ export function createSim(): Sim {
     sfx("place");
     banner = def.name;
     bannerT = 1.4;
+    saveRun();
     flush();
   }
 
@@ -1014,9 +1379,13 @@ export function createSim(): Sim {
     },
     loadProgress() {
       if (typeof localStorage === "undefined") return;
+      savedRun = readRun();
       try {
         const raw = localStorage.getItem(SAVE_KEY);
-        if (!raw) return;
+        if (!raw) {
+          if (savedRun) flush();
+          return;
+        }
         const parsed = JSON.parse(raw) as {
           v?: number;
           bestWave?: number;
@@ -1065,6 +1434,71 @@ export function createSim(): Sim {
       persist();
       flush();
     },
+    toggleAim() {
+      audio.unlock();
+      if (aiming) {
+        aiming = false;
+        flush();
+        return;
+      }
+      if (phase !== "combat") {
+        say("Обвал падает только в бою");
+        return;
+      }
+      if (abilityCd > 0) {
+        sfx("deny");
+        say(`Обвал будет готов через ${Math.ceil(abilityCd)} с`);
+        return;
+      }
+      aiming = true;
+      build = null;
+      selectedId = 0;
+      banner = "Куда уронить?";
+      bannerT = 2.5;
+      flush();
+    },
+    continueRun() {
+      if (phase !== "menu" || !savedRun) return;
+      audio.unlock();
+      const run = savedRun;
+      mapId = run.map;
+      difficulty = run.difficulty;
+      resetBoard();
+      endless = run.endless;
+      waveIndex = endless ? run.wave : Math.min(run.wave, WAVES.length - 1);
+      cheated = run.cheated || cheat;
+      gold = run.gold;
+      lives = run.lives;
+      cleared = run.cleared;
+      killed = run.killed;
+      leaked = run.leaked;
+      abilityCd = run.abilityCd;
+      abilityShown = Math.ceil(abilityCd);
+      for (const saved of run.towers) {
+        const tower: Tower = {
+          id: nextId++,
+          kind: saved.kind,
+          col: saved.col,
+          row: saved.row,
+          dmgRank: saved.dmgRank,
+          rateRank: saved.rateRank,
+          spent: saved.spent,
+          cooldown: Math.random() * 0.25,
+          target: saved.target,
+          angle: -Math.PI / 2,
+          recoil: 0,
+          born: world.anim - 10,
+        };
+        world.towers.push(tower);
+        occ.set(`${tower.col},${tower.row}`, tower.id);
+      }
+      phase = "prep";
+      prepLeft = null;
+      banner = "Димон вернулся на стену";
+      bannerT = 3;
+      persist();
+      flush();
+    },
     setMap(next) {
       if (phase !== "menu" && phase !== "victory" && phase !== "defeat") return;
       if (next === mapId) return;
@@ -1083,6 +1517,7 @@ export function createSim(): Sim {
       prepShown = PREP_SECONDS;
       banner = "Ночь не кончилась";
       bannerT = 3;
+      saveRun();
       flush();
     },
     togglePause() {
@@ -1110,6 +1545,7 @@ export function createSim(): Sim {
     selectBuild(kind) {
       if (phase === "menu" || phase === "victory" || phase === "defeat") return;
       audio.unlock();
+      aiming = false;
       if (build === kind) {
         build = null;
         flush();
@@ -1126,6 +1562,7 @@ export function createSim(): Sim {
       flush();
     },
     dismiss() {
+      aiming = false;
       build = null;
       selectedId = 0;
       world.hoverCol = -1;
@@ -1141,6 +1578,7 @@ export function createSim(): Sim {
     upgrade(track) {
       const tower = world.towers.find((item) => item.id === selectedId);
       if (!tower) return;
+      if (TOWERS[tower.kind].aura > 0) return;
       const rank = track === "dmg" ? tower.dmgRank : tower.rateRank;
       if (rank >= MAX_RANK) return;
       const cost = upgradeCost(TOWERS[tower.kind].cost, rank);
@@ -1155,6 +1593,7 @@ export function createSim(): Sim {
       else tower.rateRank++;
       burst(tower.col + 0.5, tower.row + 0.5, "#e2b15a", 7, 1);
       sfx("upgrade");
+      saveRun();
       flush();
     },
     sell() {
@@ -1168,6 +1607,7 @@ export function createSim(): Sim {
       selectedId = 0;
       float(tower.col + 0.5, tower.row + 0.3, `+${refund}`, "#e2b15a");
       sfx("coin");
+      saveRun();
       flush();
     },
     callWave() {
@@ -1180,22 +1620,25 @@ export function createSim(): Sim {
       }
       beginWave(true, bonus);
     },
-    pointer(col, row, type) {
-      if (type === "leave") {
+    pointer(col, row, type, fx = col + 0.5, fy = row + 0.5) {
+      if (type === "leave" || !isInside(col, row)) {
         world.hoverCol = -1;
         world.hoverRow = -1;
-        return;
-      }
-      if (!isInside(col, row)) {
-        world.hoverCol = -1;
-        world.hoverRow = -1;
+        world.hoverFx = -1;
+        world.hoverFy = -1;
         return;
       }
       world.hoverCol = col;
       world.hoverRow = row;
+      world.hoverFx = fx;
+      world.hoverFy = fy;
       if (type !== "down") return;
       audio.unlock();
       if (phase === "menu" || phase === "victory" || phase === "defeat") return;
+      if (aiming) {
+        castAbility(fx, fy);
+        return;
+      }
       if (occ.has(`${col},${row}`)) {
         selectAt(col, row);
         return;

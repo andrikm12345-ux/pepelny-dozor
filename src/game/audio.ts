@@ -16,6 +16,10 @@ export type SfxName =
   | "ember"
   | "frost"
   | "ballista"
+  | "tesla"
+  | "banner"
+  | "rock"
+  | "heal"
   | "hit"
   | "coin"
   | "leak"
@@ -34,6 +38,7 @@ export function createAudio(): Sfx {
   let lastCoin = 0;
   let lastHit = 0;
   let lastBoom = 0;
+  let lastHeal = 0;
   let noiseBuf: AudioBuffer | null = null;
   let mood: Mood = "calm";
   let music: { gain: GainNode; filter: BiquadFilterNode } | null = null;
@@ -198,6 +203,23 @@ export function createAudio(): Sfx {
     ember: () => shot(140, 0.12, "sawtooth", 0.04, -50),
     frost: () => shot(720, 0.09, "sine", 0.035, 140),
     ballista: () => shot(90, 0.14, "square", 0.05, -30),
+    tesla: () => {
+      shot(1400, 0.08, "sawtooth", 0.03, -900);
+      noise(0.1, 0.025, 6000);
+    },
+    banner: () => {},
+    rock: () => {
+      noise(0.55, 0.09, 700);
+      tone(60, 0.5, "sine", 0.07, -25);
+      tone(110, 0.25, "square", 0.03, -60, 0.04);
+    },
+    heal: () => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      if (now - lastHeal < 250) return;
+      lastHeal = now;
+      tone(660, 0.12, "sine", 0.018);
+      tone(990, 0.14, "sine", 0.014, 0, 0.07);
+    },
     hit: () => {
       const now = typeof performance !== "undefined" ? performance.now() : 0;
       if (now - lastHit < 40) return;

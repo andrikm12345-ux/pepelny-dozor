@@ -7,8 +7,8 @@ export const PREP_SECONDS = 8;
 export const SELL_RATIO = 0.6;
 export const MAX_RANK = 3;
 
-export type TowerKind = "archer" | "ember" | "frost" | "ballista";
-export type EnemyKind = "mite" | "runner" | "husk" | "wisp" | "boss";
+export type TowerKind = "archer" | "ember" | "frost" | "ballista" | "tesla" | "banner";
+export type EnemyKind = "mite" | "runner" | "husk" | "wisp" | "healer" | "boss";
 export type TargetMode = "first" | "last" | "close" | "strong";
 
 export interface TowerDef {
@@ -26,6 +26,10 @@ export interface TowerDef {
   pierce: boolean;
   hitsFlying: boolean;
   shot: string;
+  /** Сколько раз молния перескакивает на соседних тварей. 0 — обычный выстрел. */
+  chain: number;
+  /** Радиус усиления соседних башен. 0 — башня стреляет сама. */
+  aura: number;
 }
 
 export interface EnemyDef {
@@ -47,7 +51,7 @@ export interface SpawnGroup {
   interval: number;
 }
 
-export const TOWER_ORDER: TowerKind[] = ["archer", "ember", "frost", "ballista"];
+export const TOWER_ORDER: TowerKind[] = ["archer", "ember", "frost", "ballista", "tesla", "banner"];
 
 export const TOWERS: Record<TowerKind, TowerDef> = {
   archer: {
@@ -65,6 +69,8 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
     pierce: false,
     hitsFlying: true,
     shot: "#e7efe6",
+    chain: 0,
+    aura: 0,
   },
   ember: {
     kind: "ember",
@@ -81,6 +87,8 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
     pierce: false,
     hitsFlying: false,
     shot: "#e25b3a",
+    chain: 0,
+    aura: 0,
   },
   frost: {
     kind: "frost",
@@ -97,6 +105,8 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
     pierce: false,
     hitsFlying: true,
     shot: "#9ec4d4",
+    chain: 0,
+    aura: 0,
   },
   ballista: {
     kind: "ballista",
@@ -113,8 +123,71 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
     pierce: true,
     hitsFlying: true,
     shot: "#e2b15a",
+    chain: 0,
+    aura: 0,
+  },
+  tesla: {
+    kind: "tesla",
+    name: "Молния Димона",
+    blurb: "Бьёт тварь и перескакивает по соседним. Лучшая против плотной толпы.",
+    cost: 175,
+    range: 2.3,
+    damage: 20,
+    rate: 0.9,
+    shotSpeed: 0,
+    splash: 0,
+    slow: 0,
+    slowTime: 0,
+    pierce: false,
+    hitsFlying: true,
+    shot: "#8fd6ff",
+    chain: 3,
+    aura: 0,
+  },
+  banner: {
+    kind: "banner",
+    name: "Знамя Димона",
+    blurb: "Сама не стреляет, зато соседним башням даёт +30% урона и +20% скорости.",
+    cost: 130,
+    range: 2.1,
+    damage: 0,
+    rate: 0,
+    shotSpeed: 0,
+    splash: 0,
+    slow: 0,
+    slowTime: 0,
+    pierce: false,
+    hitsFlying: true,
+    shot: "#e2623e",
+    chain: 0,
+    aura: 2.1,
   },
 };
+
+/** Усиление от одного знамени; два знамени рядом складываются, третье уже не добавляет. */
+export const BANNER_DMG = 0.3;
+export const BANNER_RATE = 0.2;
+export const BANNER_MAX = 2;
+
+/** Молния: затухание урона на каждый прыжок и дальность прыжка в клетках. */
+export const CHAIN_FALLOFF = 0.8;
+export const CHAIN_REACH = 1.5;
+
+/** Лекарь: как часто лечит, радиус и доля здоровья за один импульс. */
+export const HEAL_EVERY = 1.5;
+export const HEAL_RADIUS = 1.7;
+export const HEAL_FRACTION = 0.03;
+
+/** Обвал Димона: способность по клику. */
+export const ABILITY_COOLDOWN = 24;
+export const ABILITY_RADIUS = 1.7;
+export const ABILITY_DELAY = 0.45;
+export const ABILITY_BASE = 90;
+export const ABILITY_PER_WAVE = 28;
+
+export function abilityDamage(waveIndex: number): number {
+  return ABILITY_BASE + ABILITY_PER_WAVE * waveIndex;
+}
 
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   mite: {
@@ -164,6 +237,18 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     flying: true,
     scale: 0.7,
     color: "#f0d8bf",
+  },
+  healer: {
+    kind: "healer",
+    name: "Знахарь",
+    tag: "лечит",
+    hp: 150,
+    speed: 1.1,
+    gold: 12,
+    armor: 0.8,
+    flying: false,
+    scale: 0.92,
+    color: "#7dff96",
   },
   boss: {
     kind: "boss",
@@ -234,6 +319,12 @@ export const WAVES: SpawnGroup[][] = [
     { kind: "wisp", count: 8, interval: 0.26 },
   ],
 ];
+
+/** Знахари выходят с 6-й волны: сколько в какой (индекс волны с нуля). */
+const HEALERS: Record<number, number> = { 5: 1, 6: 2, 7: 2, 8: 3, 9: 3, 10: 3, 11: 3 };
+for (const [index, count] of Object.entries(HEALERS)) {
+  WAVES[Number(index)]!.splice(1, 0, { kind: "healer", count, interval: 0.8 });
+}
 
 export const TARGETS: { id: TargetMode; label: string }[] = [
   { id: "first", label: "Первый" },
@@ -493,9 +584,13 @@ export interface TowerTrait {
 /** Короткие бейджи: кого башня достаёт и чем особенна. */
 export function towerTraits(def: TowerDef): TowerTrait[] {
   const traits: TowerTrait[] = [];
+  if (def.aura > 0) {
+    return [{ label: "усиливает соседей" }, { label: "сама не стреляет", bad: true }];
+  }
   traits.push(def.hitsFlying ? { label: "земля и воздух" } : { label: "только земля", bad: true });
   if (def.splash > 0) traits.push({ label: "по площади" });
   if (def.slow > 0) traits.push({ label: "замедляет" });
+  if (def.chain > 0) traits.push({ label: "цепная молния" });
   if (def.pierce) traits.push({ label: "пробивает броню" });
   else traits.push({ label: "броня гасит урон", bad: true });
   return traits;
@@ -538,6 +633,7 @@ export function waveSpec(index: number): SpawnGroup[] {
   groups.push({ kind: "runner", count: 12 + 2 * k, interval: gap(0.22) });
   groups.push({ kind: "husk", count: 6 + k, interval: gap(0.6) });
   if (mix !== 1) groups.push({ kind: "wisp", count: 8 + k, interval: gap(0.24) });
+  groups.push({ kind: "healer", count: 2 + Math.floor(k / 2), interval: gap(0.8) });
   if (k % 3 === 0) groups.push({ kind: "boss", count: Math.ceil(k / 6), interval: 1.6 });
   if (mix === 2) groups.push({ kind: "husk", count: 3 + Math.floor(k / 2), interval: gap(0.5) });
   return groups;

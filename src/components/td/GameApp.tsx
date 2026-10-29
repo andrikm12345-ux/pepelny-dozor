@@ -1,10 +1,19 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type PointerEvent,
+  type ReactNode,
+} from "react";
 import {
   Coins,
   Crosshair,
+  Flag,
   Flame,
   Heart,
   Infinity as InfinityIcon,
+  Mountain,
   Pause,
   Play,
   RotateCcw,
@@ -12,6 +21,7 @@ import {
   Target,
   Volume2,
   VolumeX,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -39,7 +49,11 @@ const ICONS: Record<TowerKind, LucideIcon> = {
   ember: Flame,
   frost: Snowflake,
   ballista: Crosshair,
+  tesla: Zap,
+  banner: Flag,
 };
+
+const TUTORIAL_KEY = "pepelny-dozor-tutor";
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -55,7 +69,20 @@ export function GameApp() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const sprites: Record<string, HTMLImageElement> = {};
-    for (const kind of ["archer", "ember", "frost", "ballista", "mite", "runner", "husk", "wisp", "boss"]) {
+    for (const kind of [
+      "archer",
+      "ember",
+      "frost",
+      "ballista",
+      "tesla",
+      "banner",
+      "mite",
+      "runner",
+      "husk",
+      "wisp",
+      "healer",
+      "boss",
+    ]) {
       const img = new Image();
       img.decoding = "async";
       img.src = `/sprites/${kind}.png`;
@@ -103,6 +130,9 @@ export function GameApp() {
       else if (event.code === "Digit2") sim.selectBuild("ember");
       else if (event.code === "Digit3") sim.selectBuild("frost");
       else if (event.code === "Digit4") sim.selectBuild("ballista");
+      else if (event.code === "Digit5") sim.selectBuild("tesla");
+      else if (event.code === "Digit6") sim.selectBuild("banner");
+      else if (event.code === "KeyQ") sim.toggleAim();
     };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("keydown", onKey);
@@ -118,17 +148,18 @@ export function GameApp() {
     const layout = boardLayout(rect.width, rect.height);
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    return {
-      col: Math.floor((x - layout.ox) / layout.cell),
-      row: Math.floor((y - layout.oy) / layout.cell),
-    };
+    const fx = (x - layout.ox) / layout.cell;
+    const fy = (y - layout.oy) / layout.cell;
+    return { col: Math.floor(fx), row: Math.floor(fy), fx, fy };
   };
 
   const intro = useWaveIntro(hud.phase, hud.wave);
+  useFirstWaveDone(hud.phase);
   const gold = useTweened(hud.gold);
 
   const ended = hud.phase === "menu" || hud.phase === "victory" || hud.phase === "defeat";
-  const progress = hud.combatTotal > 0 ? Math.max(0, Math.min(1, 1 - hud.combatLeft / hud.combatTotal)) : 0;
+  const progress =
+    hud.combatTotal > 0 ? Math.max(0, Math.min(1, 1 - hud.combatLeft / hud.combatTotal)) : 0;
 
   return (
     <div className="flex h-dvh select-none flex-col overflow-hidden bg-bg text-fg">
@@ -145,7 +176,13 @@ export function GameApp() {
             tone={hud.lives <= 5 ? "text-ember" : "text-fg"}
             pulse={hud.lives}
           />
-          <Stat icon={Coins} label="Золото" value={hud.cheat ? "∞" : `${gold}`} tone="text-gold" pulse={hud.gold} />
+          <Stat
+            icon={Coins}
+            label="Золото"
+            value={hud.cheat ? "∞" : `${gold}`}
+            tone="text-gold"
+            pulse={hud.gold}
+          />
           <Stat
             icon={Crosshair}
             label="Волна"
@@ -161,11 +198,35 @@ export function GameApp() {
           <IconButton label="Сыграть заново" onClick={sim.restart} disabled={hud.phase === "menu"}>
             <RotateCcw className="size-4" />
           </IconButton>
-          <IconButton label={hud.paused ? "Продолжить" : "Пауза"} onClick={sim.togglePause} disabled={ended}>
+          <IconButton
+            label={hud.paused ? "Продолжить" : "Пауза"}
+            onClick={sim.togglePause}
+            disabled={ended}
+          >
             {hud.paused ? <Play className="size-4" /> : <Pause className="size-4" />}
           </IconButton>
-          <IconButton label={hud.speed === 1 ? "Ускорить" : "Обычная скорость"} onClick={sim.toggleSpeed} disabled={ended}>
+          <IconButton
+            label={hud.speed === 1 ? "Ускорить" : "Обычная скорость"}
+            onClick={sim.toggleSpeed}
+            disabled={ended}
+          >
             <span className="text-xs font-semibold">{hud.speed === 1 ? "1×" : "2×"}</span>
+          </IconButton>
+          <IconButton
+            label={hud.aiming ? "Отменить обвал" : "Обвал Димона (Q)"}
+            onClick={sim.toggleAim}
+            disabled={ended}
+            active={hud.aiming}
+          >
+            {hud.abilityLeft > 0 ? (
+              <span className="text-xs font-semibold tabular-nums text-muted">
+                {hud.abilityLeft}
+              </span>
+            ) : (
+              <Mountain
+                className={cx("size-4", hud.phase === "combat" && !hud.aiming && "text-gold")}
+              />
+            )}
           </IconButton>
           <IconButton
             label={hud.cheat ? "Выключить чит" : "Чит: бесконечное золото"}
@@ -174,7 +235,10 @@ export function GameApp() {
           >
             <InfinityIcon className="size-4" />
           </IconButton>
-          <IconButton label={hud.muted ? "Включить звук" : "Выключить звук"} onClick={sim.toggleMute}>
+          <IconButton
+            label={hud.muted ? "Включить звук" : "Выключить звук"}
+            onClick={sim.toggleMute}
+          >
             {hud.muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
           </IconButton>
         </div>
@@ -186,17 +250,20 @@ export function GameApp() {
             ref={canvasRef}
             data-testid="battlefield"
             aria-label={`Поле боя Димона, карта «${MAPS[hud.mapId].name}». Тропа ведёт от портала слева к его вратам.`}
-            className="absolute inset-0 h-full w-full touch-none"
+            className={cx(
+              "absolute inset-0 h-full w-full touch-none",
+              hud.aiming && "cursor-crosshair",
+            )}
             onContextMenu={(event) => event.preventDefault()}
             onPointerLeave={() => sim.pointer(-1, -1, "leave")}
             onPointerMove={(event) => {
               const cell = cellFromEvent(event);
-              sim.pointer(cell.col, cell.row, "move");
+              sim.pointer(cell.col, cell.row, "move", cell.fx, cell.fy);
             }}
             onPointerDown={(event) => {
               event.currentTarget.setPointerCapture(event.pointerId);
               const cell = cellFromEvent(event);
-              sim.pointer(cell.col, cell.row, "down");
+              sim.pointer(cell.col, cell.row, "down", cell.fx, cell.fy);
             }}
           />
           {hud.banner && (
@@ -223,6 +290,7 @@ export function GameApp() {
           )}
           {hud.phase === "prep" && (
             <div className="absolute inset-x-0 bottom-3 flex flex-col items-center gap-2 px-3">
+              <TutorialHint hud={hud} />
               <PrepTimer left={hud.prepLeft} />
               <button
                 type="button"
@@ -235,7 +303,10 @@ export function GameApp() {
             </div>
           )}
           {hud.phase === "combat" && (
-            <div className="absolute inset-x-4 bottom-3 h-1.5 overflow-hidden rounded-full bg-surface" aria-hidden="true">
+            <div
+              className="absolute inset-x-4 bottom-3 h-1.5 overflow-hidden rounded-full bg-surface"
+              aria-hidden="true"
+            >
               <div className="h-full bg-gold" style={{ width: `${Math.round(progress * 100)}%` }} />
             </div>
           )}
@@ -253,13 +324,15 @@ export function GameApp() {
                   <li key={group.kind} className="flex items-center justify-between text-sm">
                     <span>
                       {group.name}
-                      {group.tag ? <span className="ml-2 text-xs text-muted">{group.tag}</span> : null}
+                      {group.tag ? (
+                        <span className="ml-2 text-xs text-muted">{group.tag}</span>
+                      ) : null}
                     </span>
                     <span className="font-semibold tabular-nums text-gold">×{group.count}</span>
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-xs leading-relaxed text-muted">
+              <p className="mt-2 hidden text-xs leading-relaxed text-muted lg:block">
                 Пустая клетка — башня Димона. Уже стоящая — урон, скорострельность и продажа.
               </p>
             </div>
@@ -267,7 +340,7 @@ export function GameApp() {
 
           <div>
             <p className="mb-2 text-xs tracking-[0.16em] text-muted uppercase">Арсенал Димона</p>
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-2 lg:flex lg:flex-col">
               {TOWER_ORDER.map((kind) => {
                 const def = TOWERS[kind];
                 const Icon = ICONS[kind];
@@ -280,7 +353,7 @@ export function GameApp() {
                     data-testid={`tower-${kind}`}
                     onClick={() => sim.selectBuild(kind)}
                     className={cx(
-                      "flex min-h-16 w-full items-center gap-3 rounded-2xl border px-2 py-2 text-left",
+                      "flex min-h-14 w-full items-center gap-2 rounded-2xl border px-2 py-2 text-left lg:min-h-16 lg:gap-3",
                       active ? "border-gold bg-surface-2" : "border-line bg-bg",
                       poor && !active && "opacity-60",
                     )}
@@ -288,18 +361,22 @@ export function GameApp() {
                     <img
                       src={`/sprites/${kind}.png`}
                       alt=""
-                      className="size-14 shrink-0 object-contain"
+                      className="size-10 shrink-0 object-contain lg:size-14"
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="flex items-center gap-1.5 font-semibold">
+                      <span className="flex flex-wrap items-center justify-between gap-x-2">
+                        <span className="flex items-center gap-1.5 text-sm font-semibold lg:text-base">
                           <Icon className="size-4 text-gold" aria-hidden="true" />
                           {def.name}
                         </span>
                         <span className="tabular-nums text-gold">{def.cost}</span>
                       </span>
-                      <span className="mt-0.5 block text-xs leading-snug text-muted">{def.blurb}</span>
-                      <Traits def={def} />
+                      <span className="mt-0.5 hidden text-xs leading-snug text-muted lg:block">
+                        {def.blurb}
+                      </span>
+                      <span className="hidden lg:block">
+                        <Traits def={def} />
+                      </span>
                     </span>
                   </button>
                 );
@@ -317,13 +394,65 @@ export function GameApp() {
           onEndless={sim.continueEndless}
           onDifficulty={sim.setDifficulty}
           onMap={sim.setMap}
+          onContinue={sim.continueRun}
         />
       )}
     </div>
   );
 }
 
+/** Три шага для первой игры; пропадает, когда первая волна пошла. */
+function TutorialHint({ hud }: { hud: Hud }) {
+  const [seen, setSeen] = useState(true);
+  useEffect(() => {
+    try {
+      setSeen(localStorage.getItem(TUTORIAL_KEY) === "1");
+    } catch {
+      setSeen(true);
+    }
+  }, []);
+  const done = () => {
+    setSeen(true);
+    try {
+      localStorage.setItem(TUTORIAL_KEY, "1");
+    } catch {
+      /* private mode */
+    }
+  };
+  if (seen || hud.endless || hud.wave > 1) return null;
+  const text =
+    hud.towerCount > 0
+      ? "3. Готов? Нажми «Вызвать волну»"
+      : hud.build
+        ? "2. Коснись камня рядом с тропой"
+        : "1. Выбери башню в арсенале. Начни с Лука";
+  return (
+    <div className="flex items-center gap-2 rounded-full border border-gold/50 bg-bg/90 py-1 pr-1 pl-3 text-xs text-gold">
+      <span>{text}</span>
+      <button
+        type="button"
+        onClick={done}
+        aria-label="Скрыть подсказки"
+        className="inline-flex size-7 items-center justify-center rounded-full text-muted"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 /** Титр волны на пару секунд после её начала. */
+function useFirstWaveDone(phase: string) {
+  useEffect(() => {
+    if (phase !== "combat") return;
+    try {
+      localStorage.setItem(TUTORIAL_KEY, "1");
+    } catch {
+      /* private mode */
+    }
+  }, [phase]);
+}
+
 function useWaveIntro(phase: string, wave: number) {
   const [intro, setIntro] = useState<{ wave: number; text: string; key: number } | null>(null);
   useEffect(() => {
@@ -429,7 +558,7 @@ function DimonCard({ hud, compact }: { hud: Hud; compact: boolean }) {
     <section className="rounded-2xl border border-gold/30 bg-bg px-3 py-3">
       <p className="text-xs tracking-[0.16em] text-muted uppercase">Димон</p>
       <h2 className="mt-1 font-display text-2xl leading-none text-gold">{note.title}</h2>
-      <p className="mt-2 text-sm leading-relaxed text-fg">{note.text}</p>
+      <p className="mt-2 hidden text-sm leading-relaxed text-fg lg:block">{note.text}</p>
     </section>
   );
 }
@@ -501,46 +630,63 @@ function Inspector({ hud, sim }: { hud: Hud; sim: Sim }) {
         </div>
       </div>
       <Traits def={TOWERS[selection.kind]} />
-      <p className="mt-3 text-sm text-fg">
-        Урон {selection.damage}
-        <span className="text-muted"> · </span>
-        {selection.rate}/с
-        <span className="text-muted"> · дуга {selection.range}</span>
-      </p>
-      <div className="mt-3">
-        <p className="mb-1 text-xs tracking-[0.14em] text-muted uppercase">Кого бить</p>
-        <div className="grid grid-cols-4 gap-1">
-          {TARGETS.map((mode) => (
-            <button
-              key={mode.id}
-              type="button"
-              onClick={() => sim.setTarget(mode.id)}
-              className={cx(
-                "min-h-11 rounded-xl border px-1 text-xs font-semibold",
-                selection.target === mode.id ? "border-gold bg-gold text-bg" : "border-line bg-surface text-fg",
-              )}
-            >
-              {mode.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="mt-3 grid grid-cols-1 gap-2">
-        <Upgrade
-          label="Урон"
-          rank={selection.dmgRank}
-          cost={selection.dmgCost}
-          gold={hud.cheat ? Number.POSITIVE_INFINITY : hud.gold}
-          onClick={() => sim.upgrade("dmg")}
-        />
-        <Upgrade
-          label="Скорострельность"
-          rank={selection.rateRank}
-          cost={selection.rateCost}
-          gold={hud.cheat ? Number.POSITIVE_INFINITY : hud.gold}
-          onClick={() => sim.upgrade("rate")}
-        />
-      </div>
+      {selection.support ? (
+        <p className="mt-3 text-sm leading-snug text-fg">
+          Дуга {selection.range}. Два знамени рядом складываются, третье уже не добавляет.
+        </p>
+      ) : (
+        <p className="mt-3 text-sm text-fg">
+          Урон {selection.damage}
+          <span className="text-muted"> · </span>
+          {selection.rate}/с
+          <span className="text-muted"> · дуга {selection.range}</span>
+        </p>
+      )}
+      {selection.buffed > 0 && (
+        <p className="mt-1 text-xs text-gold">
+          Усилена знаменем: +{30 * selection.buffed}% урона, +{20 * selection.buffed}% скорости
+        </p>
+      )}
+      {!selection.support && (
+        <>
+          <div className="mt-3">
+            <p className="mb-1 text-xs tracking-[0.14em] text-muted uppercase">Кого бить</p>
+            <div className="grid grid-cols-4 gap-1">
+              {TARGETS.map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => sim.setTarget(mode.id)}
+                  className={cx(
+                    "min-h-11 rounded-xl border px-1 text-xs font-semibold",
+                    selection.target === mode.id
+                      ? "border-gold bg-gold text-bg"
+                      : "border-line bg-surface text-fg",
+                  )}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-2">
+            <Upgrade
+              label="Урон"
+              rank={selection.dmgRank}
+              cost={selection.dmgCost}
+              gold={hud.cheat ? Number.POSITIVE_INFINITY : hud.gold}
+              onClick={() => sim.upgrade("dmg")}
+            />
+            <Upgrade
+              label="Скорострельность"
+              rank={selection.rateRank}
+              cost={selection.rateCost}
+              gold={hud.cheat ? Number.POSITIVE_INFINITY : hud.gold}
+              onClick={() => sim.upgrade("rate")}
+            />
+          </div>
+        </>
+      )}
       <button
         type="button"
         onClick={sim.sell}
@@ -576,11 +722,17 @@ function Upgrade({
     >
       <span>
         <span className="font-semibold">{label}</span>
-        <span className="ml-2 inline-flex gap-1 align-middle" aria-label={`уровень ${rank} из ${MAX_RANK}`}>
+        <span
+          className="ml-2 inline-flex gap-1 align-middle"
+          aria-label={`уровень ${rank} из ${MAX_RANK}`}
+        >
           {Array.from({ length: MAX_RANK }, (_, index) => (
             <span
               key={index}
-              className={cx("inline-block h-1.5 w-3 rounded-full", index < rank ? "bg-gold" : "bg-line")}
+              className={cx(
+                "inline-block h-1.5 w-3 rounded-full",
+                index < rank ? "bg-gold" : "bg-line",
+              )}
             />
           ))}
         </span>
@@ -605,7 +757,8 @@ function MapCard({
   onSelect: () => void;
 }) {
   const def = MAPS[id];
-  const toPoints = (corners: Array<[number, number]>) => corners.map(([c, r]) => `${c + 0.5},${r + 0.5}`).join(" ");
+  const toPoints = (corners: Array<[number, number]>) =>
+    corners.map(([c, r]) => `${c + 0.5},${r + 0.5}`).join(" ");
   const gate = def.routes[0]![def.routes[0]!.length - 1]!;
   return (
     <button
@@ -632,11 +785,29 @@ function MapCard({
           />
         ))}
         {def.routes.map((corners, index) => (
-          <circle key={index} cx={corners[0]![0] + 0.5} cy={corners[0]![1] + 0.5} r="0.55" fill="var(--color-ember)" />
+          <circle
+            key={index}
+            cx={corners[0]![0] + 0.5}
+            cy={corners[0]![1] + 0.5}
+            r="0.55"
+            fill="var(--color-ember)"
+          />
         ))}
-        <rect x={gate[0] + 0.1} y={gate[1] + 0.1} width="0.8" height="0.8" rx="0.2" fill="var(--color-gold)" />
+        <rect
+          x={gate[0] + 0.1}
+          y={gate[1] + 0.1}
+          width="0.8"
+          height="0.8"
+          rx="0.2"
+          fill="var(--color-gold)"
+        />
       </svg>
-      <span className={cx("px-0.5 text-xs leading-tight font-semibold", selected ? "text-gold" : "text-fg")}>
+      <span
+        className={cx(
+          "px-0.5 text-xs leading-tight font-semibold",
+          selected ? "text-gold" : "text-fg",
+        )}
+      >
         {def.name}
       </span>
       <span className="px-0.5 text-[11px] leading-none tabular-nums text-muted">
@@ -653,8 +824,10 @@ function EndScreen({
   onEndless,
   onDifficulty,
   onMap,
+  onContinue,
 }: {
   hud: Hud;
+  onContinue: () => void;
   onStart: () => void;
   onRestart: () => void;
   onEndless: () => void;
@@ -679,18 +852,23 @@ function EndScreen({
               ? `Бесконечная ночь взяла своё на волне ${hud.wave}. Димон продержался ${hud.cleared} волн. Убито ${hud.killed}.`
               : defeat
                 ? `Волна ${hud.wave} дошла до врат. Димон это запомнил. Убито ${hud.killed}, пропущено ${hud.leaked}.`
-              : "Димон стережёт пепельную тропу. Его золото капает с убитых. Башни ставь на камень, не на дорогу, и улучшай урон со скорострельностью."}
+                : "Димон стережёт пепельную тропу. Его золото капает с убитых. Башни ставь на камень, не на дорогу, и улучшай урон со скорострельностью."}
         </p>
         {!victory && !defeat && (
           <ul className="mx-auto mt-4 max-w-sm space-y-1 text-left text-sm text-fg">
             <li>Жар бьёт по площади, но не достаёт летунов.</li>
             <li>Латники держат броню — её пробивает баллиста.</li>
-            <li>Досрочный вызов волны даёт остаток золота.</li>
+            <li>Знахари лечат тварей вокруг — бей их первыми.</li>
+            <li>Обвал Димона (Q) бьёт по области раз в 24 секунды.</li>
           </ul>
         )}
         <div className="mt-5">
           <p className="mb-1.5 text-xs tracking-[0.16em] text-muted uppercase">Карта</p>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="radiogroup" aria-label="Карта">
+          <div
+            className="grid grid-cols-2 gap-1.5 sm:grid-cols-4"
+            role="radiogroup"
+            aria-label="Карта"
+          >
             {MAP_ORDER.map((id) => (
               <MapCard
                 key={id}
@@ -716,7 +894,9 @@ function EndScreen({
                 onClick={() => onDifficulty(id)}
                 className={cx(
                   "min-h-11 rounded-xl border px-1 text-xs leading-tight font-semibold",
-                  hud.difficulty === id ? "border-gold bg-gold text-bg" : "border-line bg-bg text-fg",
+                  hud.difficulty === id
+                    ? "border-gold bg-gold text-bg"
+                    : "border-line bg-bg text-fg",
                 )}
               >
                 {DIFFICULTIES[id].label}
@@ -735,23 +915,39 @@ function EndScreen({
             Дальше — бесконечная ночь
           </button>
         )}
+        {hud.phase === "menu" && hud.savedRun && (
+          <button
+            type="button"
+            data-testid="continue-run"
+            onClick={onContinue}
+            className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-gold px-5 text-base font-semibold text-bg"
+          >
+            Продолжить: волна {hud.savedRun.wave}
+            {hud.savedRun.endless ? " · бесконечная ночь" : ` · ${MAPS[hud.savedRun.mapId].name}`}
+          </button>
+        )}
         <button
           type="button"
           data-testid="restart"
           onClick={victory || defeat ? onRestart : onStart}
           className={cx(
             "inline-flex min-h-12 w-full items-center justify-center rounded-full px-5 text-base font-semibold",
-            victory ? "mt-2 border border-line bg-bg text-fg" : "mt-5 bg-gold text-bg",
+            victory || (hud.phase === "menu" && hud.savedRun)
+              ? "mt-2 border border-line bg-bg text-fg"
+              : "mt-5 bg-gold text-bg",
           )}
         >
           {victory || defeat ? "Сыграть снова" : "Встать за Димона"}
         </button>
         <p className="mt-3 text-xs text-muted">
-          {MAPS[hud.mapId].name} · {hud.livesTotal} жизней · {hud.goldTotal} золота · {hud.wavesTotal} волн
+          {MAPS[hud.mapId].name} · {hud.livesTotal} жизней · {hud.goldTotal} золота ·{" "}
+          {hud.wavesTotal} волн
           {hud.bestWave > 0 ? ` · лучшая волна ${hud.bestWave}` : ""}
           {hud.wins > 0 ? ` · побед ${hud.wins}` : ""}
         </p>
-        <p className="mt-1 hidden text-xs text-muted sm:block">1–4 выбирают башню, пробел вызывает волну, P — пауза</p>
+        <p className="mt-1 hidden text-xs text-muted sm:block">
+          1–6 выбирают башню, Q — обвал, пробел вызывает волну, P — пауза
+        </p>
       </div>
     </div>
   );
