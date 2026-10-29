@@ -81,6 +81,8 @@ export function GameApp() {
       "husk",
       "wisp",
       "healer",
+      "shield",
+      "summoner",
       "boss",
     ]) {
       const img = new Image();
@@ -133,6 +135,10 @@ export function GameApp() {
       else if (event.code === "Digit5") sim.selectBuild("tesla");
       else if (event.code === "Digit6") sim.selectBuild("banner");
       else if (event.code === "KeyQ") sim.toggleAim();
+      else if (event.code === "KeyZ" || event.code === "KeyX") {
+        const pick = sim.getSnapshot().selection?.specs[event.code === "KeyZ" ? 0 : 1];
+        if (pick) sim.specialize(pick.id);
+      }
     };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("keydown", onKey);
@@ -644,9 +650,11 @@ function Inspector({ hud, sim }: { hud: Hud; sim: Sim }) {
       )}
       {selection.buffed > 0 && (
         <p className="mt-1 text-xs text-gold">
-          Усилена знаменем: +{30 * selection.buffed}% урона, +{20 * selection.buffed}% скорости
+          Усилена знаменем: +{selection.buffDmg}% урона, +{selection.buffRate}% скорости
+          {selection.buffRange > 0 ? `, +${selection.buffRange}% дальности` : ""}
         </p>
       )}
+      <Mastery selection={selection} gold={hud.cheat ? Number.POSITIVE_INFINITY : hud.gold} sim={sim} />
       {!selection.support && (
         <>
           <div className="mt-3">
@@ -696,6 +704,75 @@ function Inspector({ hud, sim }: { hud: Hud; sim: Sim }) {
         Продать за {selection.sell}
       </button>
     </section>
+  );
+}
+
+/** Мастерство: после трёх улучшений башня выбирает один из двух путей навсегда. */
+function Mastery({
+  selection,
+  gold,
+  sim,
+}: {
+  selection: NonNullable<Hud["selection"]>;
+  gold: number;
+  sim: Sim;
+}) {
+  if (selection.spec) {
+    return (
+      <div
+        className="mt-3 rounded-xl border px-3 py-2"
+        style={{ borderColor: selection.spec.color }}
+        data-testid="spec-chosen"
+      >
+        <p className="text-xs tracking-[0.14em] text-muted uppercase">Мастерство</p>
+        <p className="font-display text-lg leading-tight" style={{ color: selection.spec.color }}>
+          {selection.spec.name}
+        </p>
+        <p className="text-xs leading-snug text-muted">{selection.spec.blurb}</p>
+      </div>
+    );
+  }
+  if (!selection.specOpen) {
+    if (selection.support) return null;
+    return (
+      <p className="mt-3 text-xs leading-snug text-muted">
+        Мастерство откроется после {selection.specNeed} улучшений ({selection.ranks}/{selection.specNeed}).
+      </p>
+    );
+  }
+  const canPay = gold >= selection.specCost;
+  return (
+    <div className="mt-3" data-testid="spec-open">
+      <p className="mb-1 flex items-baseline justify-between gap-2 text-xs tracking-[0.14em] text-muted uppercase">
+        <span>Мастерство · навсегда</span>
+        <span className={cx("tracking-normal tabular-nums", canPay ? "text-gold" : "text-muted")}>
+          {selection.specCost}
+        </span>
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {selection.specs.map((item, index) => (
+          <button
+            key={item.id}
+            type="button"
+            data-testid={`spec-${item.id}`}
+            onClick={() => sim.specialize(item.id)}
+            className={cx(
+              "flex min-h-11 flex-col items-start gap-0.5 rounded-xl border bg-surface px-2.5 py-2 text-left",
+              canPay ? "" : "opacity-60",
+            )}
+            style={{ borderColor: item.color }}
+          >
+            <span className="font-display text-base leading-tight" style={{ color: item.color }}>
+              {item.name}
+              <span className="ml-1.5 hidden text-[11px] font-sans text-muted sm:inline">
+                {index === 0 ? "Z" : "X"}
+              </span>
+            </span>
+            <span className="text-[11px] leading-snug text-muted">{item.blurb}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

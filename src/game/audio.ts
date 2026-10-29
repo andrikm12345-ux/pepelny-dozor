@@ -20,6 +20,10 @@ export type SfxName =
   | "banner"
   | "rock"
   | "heal"
+  | "shield"
+  | "summon"
+  | "stun"
+  | "spec"
   | "hit"
   | "coin"
   | "leak"
@@ -39,6 +43,8 @@ export function createAudio(): Sfx {
   let lastHit = 0;
   let lastBoom = 0;
   let lastHeal = 0;
+  let lastShield = 0;
+  let lastStun = 0;
   let noiseBuf: AudioBuffer | null = null;
   let mood: Mood = "calm";
   let music: { gain: GainNode; filter: BiquadFilterNode } | null = null;
@@ -219,6 +225,29 @@ export function createAudio(): Sfx {
       lastHeal = now;
       tone(660, 0.12, "sine", 0.018);
       tone(990, 0.14, "sine", 0.014, 0, 0.07);
+    },
+    shield: () => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      if (now - lastShield < 60) return;
+      lastShield = now;
+      tone(1500 + Math.random() * 200, 0.05, "square", 0.018);
+      tone(2200, 0.04, "triangle", 0.012, 0, 0.02);
+    },
+    summon: () => {
+      tone(180, 0.35, "sawtooth", 0.035, 140);
+      tone(270, 0.3, "sine", 0.03, 90, 0.08);
+      noise(0.25, 0.02, 1500);
+    },
+    stun: () => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      if (now - lastStun < 120) return;
+      lastStun = now;
+      tone(330, 0.06, "square", 0.025, -150);
+    },
+    spec: () => {
+      tone(392, 0.12, "triangle", 0.04);
+      tone(587, 0.14, "triangle", 0.035, 0, 0.08);
+      tone(784, 0.3, "sine", 0.035, 0, 0.16);
     },
     hit: () => {
       const now = typeof performance !== "undefined" ? performance.now() : 0;

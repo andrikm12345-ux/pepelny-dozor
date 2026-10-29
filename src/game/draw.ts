@@ -1,4 +1,4 @@
-import { ABILITY_RADIUS, COLS, ROWS, TOWERS, gateOf, isRoad, type GameMap, type Waypoint } from "./balance";
+import { ABILITY_RADIUS, COLS, ENEMIES, ROWS, SPEC_BY_ID, TOWERS, gateOf, isRoad, type GameMap, type Waypoint } from "./balance";
 import type { Bolt, Creep, Shot, Tower, World } from "./sim";
 
 export interface Board {
@@ -421,6 +421,21 @@ export function createRenderer(): Renderer {
     }
     ctx.globalAlpha = 1;
 
+    // горящая земля после Пекла
+    if (world.fires.length) {
+      ctx.globalCompositeOperation = "lighter";
+      for (const fire of world.fires) {
+        const k = clamp01(fire.life / fire.max);
+        const x = ox + fire.x * cell;
+        const y = oy + fire.y * cell;
+        const flick = 0.85 + Math.sin(anim * 11 + fire.x * 7 + fire.y * 5) * 0.15;
+        blot(ctx, "rgba(255, 110, 40, 1)", x, y, fire.radius * cell * 1.05 * flick, 0.5 * Math.min(1, k * 2.5));
+        blot(ctx, "rgba(255, 200, 90, 1)", x, y, fire.radius * cell * 0.55 * flick, 0.4 * Math.min(1, k * 2.5));
+      }
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
+
     // туман над землёй
     for (const blob of fog) {
       if (!reduceMotion) blob.u = (blob.u + blob.speed * dt + 1.2) % 1.2;
@@ -559,9 +574,10 @@ export function createRenderer(): Renderer {
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     }
-    if (ranks > 0) {
-      ctx.strokeStyle = def.shot;
-      ctx.globalAlpha = 0.2 + ranks * 0.1;
+    const specColor = tower.spec ? SPEC_BY_ID[tower.spec].color : null;
+    if (ranks > 0 || specColor) {
+      ctx.strokeStyle = specColor ?? def.shot;
+      ctx.globalAlpha = specColor ? 0.75 : 0.2 + ranks * 0.1;
       ctx.lineWidth = Math.max(1, cell * 0.04);
       ctx.beginPath();
       ctx.ellipse(x, y + cell * 0.36, cell * 0.42, cell * 0.15, 0, 0, Math.PI * 2);
@@ -586,6 +602,29 @@ export function createRenderer(): Renderer {
       ctx.lineTo(ax, ay);
       ctx.stroke();
       ctx.globalAlpha = 1;
+    }
+
+    // значок мастерства: звёздочка цвета ветки над башней
+    if (specColor) {
+      const sx = x + cell * 0.32;
+      const sy = y - cell * 0.4;
+      const outer = cell * 0.13;
+      const inner = outer * 0.45;
+      ctx.fillStyle = specColor;
+      ctx.strokeStyle = "rgba(10, 8, 6, 0.85)";
+      ctx.lineWidth = Math.max(1, cell * 0.025);
+      ctx.beginPath();
+      for (let k = 0; k < 8; k++) {
+        const a = -Math.PI / 2 + (k * Math.PI) / 4;
+        const rr = k % 2 === 0 ? outer : inner;
+        const px2 = sx + Math.cos(a) * rr;
+        const py2 = sy + Math.sin(a) * rr;
+        if (k === 0) ctx.moveTo(px2, py2);
+        else ctx.lineTo(px2, py2);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
     }
 
     // уровни: золотые — урон, голубые — скорострельность
@@ -628,6 +667,12 @@ export function createRenderer(): Renderer {
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
     }
+    if (enemy.kind === "summoner") {
+      ctx.globalCompositeOperation = "lighter";
+      blot(ctx, "rgba(183, 140, 255, 1)", x, y, size * 0.8, 0.3 + Math.sin(anim * 3 + enemy.id) * 0.1);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
     if (enemy.kind === "boss") {
       ctx.globalCompositeOperation = "lighter";
       blot(ctx, "rgba(226, 91, 58, 1)", x, y, size * 0.9, 0.35 + Math.sin(anim * 4) * 0.12);
@@ -640,6 +685,50 @@ export function createRenderer(): Renderer {
     const tilt = enemy.flying ? 0 : Math.sin(anim * 7 + enemy.id) * 0.05;
     if (!drawSprite(ctx, sprites[enemy.kind], x, y, size, flip, squash, tilt)) {
       fallbackCreep(ctx, x, y, size * 0.32, enemy.color);
+    }
+    if (enemy.shield > 0) {
+      // щит дугой спереди; ударов осталось — столько насечек
+      const max = ENEMIES.shield.shield ?? 4;
+      const face = Math.hypot(enemy.vx, enemy.vy) > 0.01 ? Math.atan2(enemy.vy, enemy.vx) : 0;
+      ctx.strokeStyle = `rgba(165, 210, 245, ${0.45 + 0.12 * enemy.shield})`;
+      ctx.lineWidth = Math.max(2, cell * 0.08);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.arc(x, y, size * 0.5, face - 1.05, face + 1.05);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(235, 248, 255, 0.9)";
+      ctx.lineWidth = Math.max(1, cell * 0.035);
+      for (let k = 0; k < enemy.shield; k++) {
+        const a = face - 0.7 + (k * 1.4) / Math.max(1, max - 1);
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(a) * size * 0.43, y + Math.sin(a) * size * 0.43);
+        ctx.lineTo(x + Math.cos(a) * size * 0.57, y + Math.sin(a) * size * 0.57);
+        ctx.stroke();
+      }
+    }
+    if (enemy.brittleT > 0) {
+      ctx.strokeStyle = "rgba(217, 200, 255, 0.9)";
+      ctx.lineWidth = Math.max(1, cell * 0.03);
+      for (let k = 0; k < 3; k++) {
+        const a = anim * 0.6 + k * 2.1 + enemy.id;
+        const cx2 = x + Math.cos(a) * size * 0.3;
+        const cy2 = y + Math.sin(a) * size * 0.22;
+        ctx.beginPath();
+        ctx.moveTo(cx2 - 3, cy2 - 3);
+        ctx.lineTo(cx2 + 3, cy2 + 3);
+        ctx.moveTo(cx2 + 3, cy2 - 3);
+        ctx.lineTo(cx2 - 3, cy2 + 3);
+        ctx.stroke();
+      }
+    }
+    if (enemy.stun > 0) {
+      ctx.fillStyle = "#ffe08a";
+      for (let k = 0; k < 3; k++) {
+        const a = anim * 7 + (k * Math.PI * 2) / 3;
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(a) * size * 0.28, y - size * 0.5 + Math.sin(a) * size * 0.08, Math.max(1.5, cell * 0.04), 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     if (enemy.slowT > 0) {
       blot(ctx, "rgba(158, 196, 212, 1)", x, y, size * 0.5, 0.45);
@@ -688,6 +777,26 @@ export function createRenderer(): Renderer {
   /** Молния: рваная ломаная, которая мерцает, пока гаснет. */
   function drawBolt(ctx: CanvasRenderingContext2D, bolt: Bolt, { cell, ox, oy }: Board) {
     const fade = clamp01(bolt.life / bolt.max);
+    if (bolt.beam) {
+      const a = bolt.pts[0]!;
+      const b = bolt.pts[bolt.pts.length - 1]!;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineCap = "round";
+      ctx.strokeStyle = bolt.beam;
+      ctx.globalAlpha = 0.35 * fade;
+      ctx.lineWidth = cell * 0.22;
+      ctx.beginPath();
+      ctx.moveTo(ox + a.x * cell, oy + a.y * cell);
+      ctx.lineTo(ox + b.x * cell, oy + b.y * cell);
+      ctx.stroke();
+      ctx.globalAlpha = fade;
+      ctx.strokeStyle = "#fff6e0";
+      ctx.lineWidth = Math.max(1.5, cell * 0.06);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
     const frame = Math.floor(bolt.life * 60);
     const path: Pt[] = [];
     for (let i = 0; i < bolt.pts.length - 1; i++) {
@@ -864,6 +973,9 @@ export function createRenderer(): Renderer {
       if (!shot.alive) continue;
       lights.push([shot.color, ox + shot.x * cell, oy + shot.y * cell, cell * (shot.kind === "ember" ? 1.6 : 0.8), shot.kind === "ember" ? 0.5 : 0.25]);
     }
+    for (const fire of world.fires) {
+      lights.push(["rgba(255, 130, 50, 1)", ox + fire.x * cell, oy + fire.y * cell, cell * (fire.radius + 0.6), 0.45 * clamp01(fire.life / fire.max)]);
+    }
     for (const flash of world.flashes) {
       const t = clamp01(flash.life / flash.max);
       lights.push([flash.color, ox + flash.x * cell, oy + flash.y * cell, cell * flash.radius * (0.6 + t * 0.4), t * 0.7]);
@@ -888,7 +1000,7 @@ export function createRenderer(): Renderer {
     const selected = world.towers.find((tower) => tower.id === world.selectedId);
     if (selected) {
       const def = TOWERS[selected.kind];
-      rangeRing(ctx, board, selected.col, selected.row, def.range, def.shot, true);
+      rangeRing(ctx, board, selected.col, selected.row, selected.range, def.shot, true);
       const { x, y } = towerCenter(selected, board);
       ctx.strokeStyle = "#e2b15a";
       ctx.lineWidth = 1.5;

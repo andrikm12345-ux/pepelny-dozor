@@ -8,7 +8,7 @@ export const SELL_RATIO = 0.6;
 export const MAX_RANK = 3;
 
 export type TowerKind = "archer" | "ember" | "frost" | "ballista" | "tesla" | "banner";
-export type EnemyKind = "mite" | "runner" | "husk" | "wisp" | "healer" | "boss";
+export type EnemyKind = "mite" | "runner" | "husk" | "wisp" | "healer" | "shield" | "summoner" | "boss";
 export type TargetMode = "first" | "last" | "close" | "strong";
 
 export interface TowerDef {
@@ -43,6 +43,10 @@ export interface EnemyDef {
   flying: boolean;
   scale: number;
   color: string;
+  /** Сколько попаданий гасит щит. */
+  shield?: number;
+  /** Призыв: раз в every секунд выпускает count угольков, но не больше cap живых. */
+  summon?: { every: number; count: number; cap: number };
 }
 
 export interface SpawnGroup {
@@ -189,6 +193,197 @@ export function abilityDamage(waveIndex: number): number {
   return ABILITY_BASE + ABILITY_PER_WAVE * waveIndex;
 }
 
+/** Щитоносец: хрупкость и горение живут столько секунд. */
+export const BRITTLE_TIME = 3;
+export const BURN_TIME = 2.5;
+
+export type SpecId =
+  | "sniper"
+  | "volley"
+  | "inferno"
+  | "volcano"
+  | "stasis"
+  | "brittle"
+  | "pierce"
+  | "stun"
+  | "storm"
+  | "arc"
+  | "warband"
+  | "watch";
+
+export interface SpecDef {
+  id: SpecId;
+  tower: TowerKind;
+  name: string;
+  blurb: string;
+  color: string;
+}
+
+/** Две ветки мастерства для каждой башни. */
+export const SPECS: Record<TowerKind, [SpecDef, SpecDef]> = {
+  archer: [
+    { id: "sniper", tower: "archer", name: "Снайпер", blurb: "Дальше и сильнее, но реже: урон ×1.9, дуга +1.2.", color: "#f2e6a8" },
+    { id: "volley", tower: "archer", name: "Град стрел", blurb: "Бьёт сразу по трём разным целям.", color: "#a8f2c2" },
+  ],
+  ember: [
+    { id: "inferno", tower: "ember", name: "Пекло", blurb: "После взрыва земля горит 2.5 с и жжёт сквозь щиты.", color: "#ff7a3a" },
+    { id: "volcano", tower: "ember", name: "Вулкан", blurb: "Взрыв шире в полтора раза и достаёт летунов.", color: "#ffb35a" },
+  ],
+  frost: [
+    { id: "stasis", tower: "frost", name: "Стужа", blurb: "Замедляет сильнее и по площади.", color: "#bfe8ff" },
+    { id: "brittle", tower: "frost", name: "Хрупкость", blurb: "Цель 3 с получает на 30% больше урона от всех.", color: "#d9c8ff" },
+  ],
+  ballista: [
+    { id: "pierce", tower: "ballista", name: "Пробой", blurb: "Болт летит насквозь и бьёт всех на линии.", color: "#ffd88a" },
+    { id: "stun", tower: "ballista", name: "Оглушение", blurb: "Урон ×1.4 и стоп на 0.6 с (у Тарана 0.2 с).", color: "#ffb08a" },
+  ],
+  tesla: [
+    { id: "storm", tower: "tesla", name: "Гроза", blurb: "Шесть прыжков, молния почти не слабеет.", color: "#8fd6ff" },
+    { id: "arc", tower: "tesla", name: "Разряд", blurb: "Один прыжок, урон ×1.8 и стоп цели на 0.35 с.", color: "#e6b8ff" },
+  ],
+  banner: [
+    { id: "warband", tower: "banner", name: "Боевое", blurb: "Соседям ещё +20% урона (всего +50%).", color: "#ff8a6a" },
+    { id: "watch", tower: "banner", name: "Дозорное", blurb: "Соседям +20% дальности и ещё +15% скорости.", color: "#8fe0b0" },
+  ],
+};
+
+export const SPEC_BY_ID = Object.fromEntries(
+  Object.values(SPECS).flatMap((pair) => pair.map((def) => [def.id, def])),
+) as Record<SpecId, SpecDef>;
+
+/** Сколько рангов нужно для мастерства; у Знамени рангов нет — доступно сразу. */
+export function specNeed(kind: TowerKind): number {
+  return TOWERS[kind].aura > 0 ? 0 : SPEC_RANKS;
+}
+
+export const SPEC_RANKS = 3;
+
+export function specCost(kind: TowerKind): number {
+  return Math.round(TOWERS[kind].cost * 1.2);
+}
+
+/** Усиление от знамён вокруг башни. */
+export interface Buff {
+  count: number;
+  dmg: number;
+  rate: number;
+  range: number;
+}
+
+export const NO_BUFF: Buff = { count: 0, dmg: 0, rate: 0, range: 0 };
+
+export interface TowerStats {
+  damage: number;
+  rate: number;
+  range: number;
+  splash: number;
+  slow: number;
+  slowTime: number;
+  pierce: boolean;
+  hitsFlying: boolean;
+  chain: number;
+  chainFalloff: number;
+  /** Сколько целей за выстрел. */
+  targets: number;
+  /** Болт насквозь по линии. */
+  line: boolean;
+  stun: number;
+  brittle: number;
+  /** Урон в секунду на горящей земле. */
+  burn: number;
+  /** Что даёт соседним башням (только знамя). */
+  auraDmg: number;
+  auraRate: number;
+  auraRange: number;
+}
+
+/** Итоговые характеристики башни: ранги, ветка и знамёна в одном месте. */
+export function towerStats(
+  kind: TowerKind,
+  dmgRank: number,
+  rateRank: number,
+  spec: SpecId | null,
+  buff: Buff = NO_BUFF,
+): TowerStats {
+  const def = TOWERS[kind];
+  const st: TowerStats = {
+    damage: def.damage * dmgMult(dmgRank),
+    rate: def.rate * rateMult(rateRank),
+    range: def.range,
+    splash: def.splash,
+    slow: def.slow,
+    slowTime: def.slowTime,
+    pierce: def.pierce,
+    hitsFlying: def.hitsFlying,
+    chain: def.chain,
+    chainFalloff: CHAIN_FALLOFF,
+    targets: 1,
+    line: false,
+    stun: 0,
+    brittle: 0,
+    burn: 0,
+    auraDmg: def.aura > 0 ? BANNER_DMG : 0,
+    auraRate: def.aura > 0 ? BANNER_RATE : 0,
+    auraRange: 0,
+  };
+  switch (spec) {
+    case "sniper":
+      st.range += 1.2;
+      st.damage *= 1.9;
+      st.rate *= 0.65;
+      break;
+    case "volley":
+      st.targets = 3;
+      st.damage *= 0.75;
+      break;
+    case "inferno":
+      st.burn = st.damage * 0.35;
+      break;
+    case "volcano":
+      st.splash *= 1.5;
+      st.hitsFlying = true;
+      st.damage *= 0.9;
+      break;
+    case "stasis":
+      st.slow = 0.3;
+      st.splash = 0.8;
+      break;
+    case "brittle":
+      st.brittle = 0.3;
+      break;
+    case "pierce":
+      st.line = true;
+      st.damage *= 0.9;
+      break;
+    case "stun":
+      st.damage *= 1.4;
+      st.stun = 0.6;
+      break;
+    case "storm":
+      st.chain = 6;
+      st.chainFalloff = 0.9;
+      break;
+    case "arc":
+      st.chain = 1;
+      st.damage *= 1.8;
+      st.stun = 0.35;
+      break;
+    case "warband":
+      st.auraDmg += 0.2;
+      break;
+    case "watch":
+      st.auraRate += 0.15;
+      st.auraRange = 0.2;
+      break;
+    default:
+      break;
+  }
+  st.damage *= 1 + buff.dmg;
+  st.rate *= 1 + buff.rate;
+  st.range *= 1 + buff.range;
+  return st;
+}
+
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   mite: {
     kind: "mite",
@@ -249,6 +444,32 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     flying: false,
     scale: 0.92,
     color: "#7dff96",
+  },
+  shield: {
+    kind: "shield",
+    name: "Щитоносец",
+    tag: "щит на 4 удара",
+    hp: 180,
+    speed: 0.95,
+    gold: 13,
+    armor: 0.9,
+    flying: false,
+    scale: 0.96,
+    color: "#8fb8d9",
+    shield: 4,
+  },
+  summoner: {
+    kind: "summoner",
+    name: "Призыватель",
+    tag: "зовёт угольков",
+    hp: 260,
+    speed: 0.7,
+    gold: 16,
+    armor: 0.8,
+    flying: false,
+    scale: 1.02,
+    color: "#b78cff",
+    summon: { every: 4, count: 2, cap: 8 },
   },
   boss: {
     kind: "boss",
@@ -324,6 +545,16 @@ export const WAVES: SpawnGroup[][] = [
 const HEALERS: Record<number, number> = { 5: 1, 6: 2, 7: 2, 8: 3, 9: 3, 10: 3, 11: 3 };
 for (const [index, count] of Object.entries(HEALERS)) {
   WAVES[Number(index)]!.splice(1, 0, { kind: "healer", count, interval: 0.8 });
+}
+
+/** Щитоносцы с 4-й волны, Призыватели с 7-й (индекс волны с нуля). */
+const SHIELDS: Record<number, number> = { 4: 1, 5: 1, 6: 2, 7: 2, 8: 3, 9: 3, 10: 4, 11: 5 };
+for (const [index, count] of Object.entries(SHIELDS)) {
+  WAVES[Number(index)]!.splice(1, 0, { kind: "shield", count, interval: 0.7 });
+}
+const SUMMONERS: Record<number, number> = { 7: 1, 8: 1, 9: 1, 10: 2, 11: 2 };
+for (const [index, count] of Object.entries(SUMMONERS)) {
+  WAVES[Number(index)]!.push({ kind: "summoner", count, interval: 1.6 });
 }
 
 export const TARGETS: { id: TargetMode; label: string }[] = [
@@ -634,6 +865,8 @@ export function waveSpec(index: number): SpawnGroup[] {
   groups.push({ kind: "husk", count: 6 + k, interval: gap(0.6) });
   if (mix !== 1) groups.push({ kind: "wisp", count: 8 + k, interval: gap(0.24) });
   groups.push({ kind: "healer", count: 2 + Math.floor(k / 2), interval: gap(0.8) });
+  groups.push({ kind: "shield", count: 6 + Math.floor(k / 2), interval: gap(0.7) });
+  groups.push({ kind: "summoner", count: 2 + Math.floor(k / 3), interval: gap(1.6) });
   if (k % 3 === 0) groups.push({ kind: "boss", count: Math.ceil(k / 6), interval: 1.6 });
   if (mix === 2) groups.push({ kind: "husk", count: 3 + Math.floor(k / 2), interval: gap(0.5) });
   return groups;

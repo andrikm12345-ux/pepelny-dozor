@@ -2,10 +2,9 @@ import {
   ABILITY_COOLDOWN,
   ABILITY_DELAY,
   ABILITY_RADIUS,
-  BANNER_DMG,
   BANNER_MAX,
-  BANNER_RATE,
-  CHAIN_FALLOFF,
+  BRITTLE_TIME,
+  BURN_TIME,
   CHAIN_REACH,
   DIFFICULTIES,
   ENEMIES,
@@ -13,27 +12,33 @@ import {
   HEAL_FRACTION,
   HEAL_RADIUS,
   MAX_RANK,
+  NO_BUFF,
   PREP_SECONDS,
   SELL_RATIO,
+  SPECS,
+  SPEC_BY_ID,
   TOWERS,
   MAPS,
   MAP_ORDER,
   WAVES,
   abilityDamage,
-  dmgMult,
   gateOf,
   getMap,
   isInside,
   isRoad,
-  rateMult,
+  specCost,
+  specNeed,
+  towerStats,
   upgradeCost,
   wavePreview,
   waveScale,
   waveSpec,
+  type Buff,
   type Difficulty,
   type EnemyKind,
   type GameMap,
   type MapId,
+  type SpecId,
   type TargetMode,
   type TowerKind,
   type WaveEntry,
@@ -65,6 +70,7 @@ interface SavedRun {
     rateRank: number;
     spent: number;
     target: TargetMode;
+    spec: SpecId | null;
   }>;
 }
 
@@ -131,6 +137,17 @@ export interface Creep {
   vy: number;
   /** Секунд до следующего импульса лечения (только у знахарей). */
   healT: number;
+  /** Сколько попаданий ещё гасит щит. */
+  shield: number;
+  /** Секунд стоит на месте после оглушения. */
+  stun: number;
+  /** Секунд получает больше урона. */
+  brittleT: number;
+  brittle: number;
+  /** Секунд до следующего призыва (только у призывателей). */
+  summonT: number;
+  /** Кто призвал; 0 — вышел из портала сам. */
+  ownerId: number;
 }
 
 export interface Tower {
@@ -147,6 +164,11 @@ export interface Tower {
   recoil: number;
   /** world.anim в момент постройки — для анимации появления. */
   born: number;
+  spec: SpecId | null;
+  /** Усиление от знамён вокруг; пересчитывается при изменении башен. */
+  buff: Buff;
+  /** Итоговая дальность с рангами, веткой и знамёнами. */
+  range: number;
 }
 
 export interface Shot {
@@ -166,6 +188,12 @@ export interface Shot {
   targetId: number | null;
   life: number;
   alive: boolean;
+  /** Секунд оглушения при попадании. */
+  stun: number;
+  /** Прибавка к урону, которую получает цель (хрупкость). */
+  brittle: number;
+  /** Урон в секунду на горящей земле в точке удара. */
+  burn: number;
 }
 
 export interface Particle {
@@ -191,6 +219,18 @@ export interface Floater {
 /** Молния: ломаная от башни по цепочке тварей. */
 export interface Bolt {
   pts: Array<{ x: number; y: number }>;
+  life: number;
+  max: number;
+  /** Прямой луч (пробой баллисты) этого цвета вместо молнии. */
+  beam?: string;
+}
+
+/** Горящая земля после Пекла. */
+export interface Fire {
+  x: number;
+  y: number;
+  radius: number;
+  dps: number;
   life: number;
   max: number;
 }
@@ -243,6 +283,7 @@ export interface World {
   decals: Decal[];
   flashes: Flash[];
   bolts: Bolt[];
+  fires: Fire[];
   strikes: Strike[];
   map: GameMap;
   hoverCol: number;
@@ -275,8 +316,20 @@ export interface SelectionView {
   range: number;
   /** Башня-усилитель: сама не стреляет. */
   support: boolean;
-  /** Сколько знамён усиливает эту башню. */
+  /** Сколько знамён усиливает эту башню и на сколько процентов. */
   buffed: number;
+  buffDmg: number;
+  buffRate: number;
+  buffRange: number;
+  /** Выбранная ветка мастерства. */
+  spec: { id: SpecId; name: string; blurb: string; color: string } | null;
+  /** Обе ветки башни и их цена; открыты, когда хватает рангов. */
+  specs: Array<{ id: SpecId; name: string; blurb: string; color: string }>;
+  specCost: number;
+  specOpen: boolean;
+  /** Сколько рангов нужно для мастерства и сколько уже куплено. */
+  specNeed: number;
+  ranks: number;
 }
 
 export interface Hud {
@@ -340,6 +393,7 @@ export interface Sim {
   dismiss(): void;
   setTarget(mode: TargetMode): void;
   upgrade(track: "dmg" | "rate"): void;
+  specialize(spec: SpecId): void;
   sell(): void;
   callWave(): void;
   pointer(col: number, row: number, type: "move" | "down" | "leave", fx?: number, fy?: number): void;
@@ -413,6 +467,7 @@ export function createSim(): Sim {
     decals: [],
     flashes: [],
     bolts: [],
+    fires: [],
     strikes: [],
     map: getMap(mapId),
     hoverCol: -1,
@@ -430,18 +485,36 @@ export function createSim(): Sim {
 
   let snapshot = assemble();
 
-  /** Сколько знамён (не больше BANNER_MAX) усиливают башню. */
-  function bannersAround(tower: Tower): number {
-    if (TOWERS[tower.kind].aura > 0) return 0;
-    let count = 0;
+  function statsOf(tower: Tower) {
+    return towerStats(tower.kind, tower.dmgRank, tower.rateRank, tower.spec, tower.buff);
+  }
+
+  /** Усиление от двух самых сильных знамён рядом (BANNER_MAX). */
+  function bannerBuff(tower: Tower): Buff {
+    if (TOWERS[tower.kind].aura > 0) return NO_BUFF;
+    const found: Array<ReturnType<typeof towerStats>> = [];
     for (const other of world.towers) {
       const aura = TOWERS[other.kind].aura;
       if (aura <= 0) continue;
       const dx = other.col - tower.col;
       const dy = other.row - tower.row;
-      if (dx * dx + dy * dy <= aura * aura) count++;
+      if (dx * dx + dy * dy <= aura * aura) found.push(towerStats(other.kind, 0, 0, other.spec));
     }
-    return Math.min(count, BANNER_MAX);
+    found.sort((a, b) => b.auraDmg + b.auraRate + b.auraRange - (a.auraDmg + a.auraRate + a.auraRange));
+    const used = found.slice(0, BANNER_MAX);
+    if (!used.length) return NO_BUFF;
+    return {
+      count: used.length,
+      dmg: used.reduce((sum, item) => sum + item.auraDmg, 0),
+      rate: used.reduce((sum, item) => sum + item.auraRate, 0),
+      range: used.reduce((sum, item) => sum + item.auraRange, 0),
+    };
+  }
+
+  /** Пересчитать усиление и дальность всех башен: зови после любой смены состава или ветки. */
+  function refreshTowers() {
+    for (const tower of world.towers) tower.buff = bannerBuff(tower);
+    for (const tower of world.towers) tower.range = statsOf(tower).range;
   }
 
   function assemble(): Hud {
@@ -449,7 +522,11 @@ export function createSim(): Sim {
     let selection: SelectionView | null = null;
     if (tower) {
       const def = TOWERS[tower.kind];
-      const buffed = bannersAround(tower);
+      const stats = statsOf(tower);
+      const pair = SPECS[tower.kind];
+      const chosen = tower.spec ? SPEC_BY_ID[tower.spec] : null;
+      const ranks = tower.dmgRank + tower.rateRank;
+      const need = specNeed(tower.kind);
       selection = {
         id: tower.id,
         kind: tower.kind,
@@ -461,11 +538,20 @@ export function createSim(): Sim {
         rateCost: def.aura > 0 || tower.rateRank >= MAX_RANK ? null : upgradeCost(def.cost, tower.rateRank),
         sell: Math.floor(tower.spent * SELL_RATIO),
         target: tower.target,
-        damage: Math.round(def.damage * dmgMult(tower.dmgRank) * (1 + BANNER_DMG * buffed)),
-        rate: Math.round(def.rate * rateMult(tower.rateRank) * (1 + BANNER_RATE * buffed) * 10) / 10,
-        range: def.range,
+        damage: Math.round(stats.damage),
+        rate: Math.round(stats.rate * 10) / 10,
+        range: Math.round(stats.range * 100) / 100,
         support: def.aura > 0,
-        buffed,
+        buffed: tower.buff.count,
+        buffDmg: Math.round(tower.buff.dmg * 100),
+        buffRate: Math.round(tower.buff.rate * 100),
+        buffRange: Math.round(tower.buff.range * 100),
+        spec: chosen && { id: chosen.id, name: chosen.name, blurb: chosen.blurb, color: chosen.color },
+        specs: pair.map((item) => ({ id: item.id, name: item.name, blurb: item.blurb, color: item.color })),
+        specCost: specCost(tower.kind),
+        specOpen: !tower.spec && ranks >= need,
+        specNeed: need,
+        ranks,
       };
     }
     return {
@@ -671,8 +757,19 @@ export function createSim(): Sim {
   }
 
   function hurtEnemy(enemy: Creep, shot: Shot) {
+    if (enemy.shield > 0) {
+      // щит гасит любое попадание целиком
+      enemy.shield--;
+      enemy.flash = 0.14;
+      addRing(enemy.x, enemy.y, 0.1, 0.5, "#8fb8d9", 0.25);
+      sfx("shield");
+      if (enemy.shield === 0) float(enemy.x, enemy.y - 0.5, "щит сбит", "#8fb8d9");
+      dirty = true;
+      return;
+    }
     let amount = shot.damage;
     if (enemy.armor < 1 && !shot.pierce) amount *= enemy.armor;
+    if (enemy.brittleT > 0) amount *= 1 + enemy.brittle;
     enemy.hp -= amount;
     enemy.flash = 0.14;
     if (shot.kind === "ballista") float(enemy.x, enemy.y - 0.45, `${Math.round(amount)}`, "#ffd88a");
@@ -680,7 +777,27 @@ export function createSim(): Sim {
       if (enemy.slowT <= 0 || shot.slow < enemy.slow) enemy.slow = shot.slow;
       enemy.slowT = Math.max(enemy.slowT, shot.slowTime);
     }
+    if (shot.stun > 0 && enemy.hp > 0) {
+      const time = enemy.kind === "boss" ? Math.min(shot.stun, 0.2) : shot.stun;
+      if (time > enemy.stun) {
+        enemy.stun = time;
+        addRing(enemy.x, enemy.y - 0.3, 0.1, 0.45, "#ffe08a", 0.3);
+        sfx("stun");
+      }
+    }
+    if (shot.brittle > 0) {
+      enemy.brittle = shot.brittle;
+      enemy.brittleT = BRITTLE_TIME;
+    }
     sfx("hit");
+    if (enemy.hp <= 0) killEnemy(enemy);
+  }
+
+  /** Урон от огня: щит не гасит, броня действует. */
+  function burnEnemy(enemy: Creep, amount: number) {
+    let dmg = amount * (enemy.armor < 1 ? enemy.armor : 1);
+    if (enemy.brittleT > 0) dmg *= 1 + enemy.brittle;
+    enemy.hp -= dmg;
     if (enemy.hp <= 0) killEnemy(enemy);
   }
 
@@ -695,42 +812,40 @@ export function createSim(): Sim {
       const dy = enemy.y - y;
       if (dx * dx + dy * dy <= r2) hurtEnemy(enemy, shot);
     }
-    burst(x, y, shot.color, shot.splash > 0 ? 12 : 5, shot.splash > 0 ? 1.8 : 1);
-    if (shot.splash > 0) {
+    const blast = shot.kind === "ember";
+    burst(x, y, shot.color, blast ? 12 : 5, blast ? 1.8 : 1);
+    if (blast) {
       addRing(x, y, 0.15, shot.splash, "#ff8a4a", 0.45);
       addFlash(x, y, 2.2, "#ff8a4a", 0.35);
       sfx("boom");
     } else if (shot.slow > 0) {
-      addRing(x, y, 0.1, 0.55, "#cfe7f0", 0.35);
+      addRing(x, y, 0.1, Math.max(0.55, shot.splash), "#cfe7f0", 0.35);
       addFlash(x, y, 0.9, "#9ec4d4", 0.2);
     } else {
       addFlash(x, y, shot.kind === "ballista" ? 1.2 : 0.6, shot.color, 0.15);
     }
+    if (shot.burn > 0) {
+      world.fires.push({ x, y, radius: radius * 0.85, dps: shot.burn, life: BURN_TIME, max: BURN_TIME });
+      if (world.fires.length > 24) world.fires.shift();
+    }
   }
 
-  function spawn(kind: EnemyKind) {
+  function makeCreep(kind: EnemyKind, route: number, x: number, y: number, goldShare = 1): Creep {
     const def = ENEMIES[kind];
     const scale = waveScale(waveIndex);
     const hp = Math.round(def.hp * DIFFICULTIES[runDifficulty].hp * scale.hp);
-    // на карте с двумя порталами твари выходят по очереди из каждого
-    const route = spawnCount++ % world.map.routes.length;
-    const points = world.map.routes[route]!;
-    const origin = points[0]!;
-    const next = points[1] ?? origin;
-    const ang = Math.atan2(next.y - origin.y, next.x - origin.x);
-    const side = (Math.random() - 0.5) * 0.18;
-    const enemy: Creep = {
+    return {
       id: nextId++,
       kind,
-      x: origin.x + Math.cos(ang + Math.PI / 2) * side,
-      y: origin.y + Math.sin(ang + Math.PI / 2) * side,
+      x,
+      y,
       route,
       wpi: 1,
       travel: 0,
       hp,
       maxHp: hp,
       speed: def.speed * scale.speed,
-      gold: Math.round(def.gold * scale.gold),
+      gold: Math.max(1, Math.round(def.gold * scale.gold * goldShare)),
       armor: def.armor,
       flying: def.flying,
       scale: def.scale,
@@ -742,7 +857,29 @@ export function createSim(): Sim {
       vx: 0,
       vy: 0,
       healT: HEAL_EVERY * Math.random(),
+      shield: def.shield ?? 0,
+      stun: 0,
+      brittleT: 0,
+      brittle: 0,
+      summonT: def.summon ? def.summon.every * (0.4 + Math.random() * 0.4) : 0,
+      ownerId: 0,
     };
+  }
+
+  function spawn(kind: EnemyKind) {
+    // на карте с двумя порталами твари выходят по очереди из каждого
+    const route = spawnCount++ % world.map.routes.length;
+    const points = world.map.routes[route]!;
+    const origin = points[0]!;
+    const next = points[1] ?? origin;
+    const ang = Math.atan2(next.y - origin.y, next.x - origin.x);
+    const side = (Math.random() - 0.5) * 0.18;
+    const enemy = makeCreep(
+      kind,
+      route,
+      origin.x + Math.cos(ang + Math.PI / 2) * side,
+      origin.y + Math.sin(ang + Math.PI / 2) * side,
+    );
     world.enemies.push(enemy);
     byId.set(enemy.id, enemy);
     if (kind === "boss") {
@@ -753,6 +890,50 @@ export function createSim(): Sim {
       bannerT = 3;
       dirty = true;
     }
+  }
+
+  /** Призыватели выпускают угольков на свою тропу, не больше положенного числа живых. */
+  function summonPulse(dt: number) {
+    for (const boss of world.enemies) {
+      if (!boss.alive || boss.kind !== "summoner") continue;
+      boss.summonT -= dt;
+      if (boss.summonT > 0) continue;
+      const rule = ENEMIES.summoner.summon!;
+      boss.summonT += rule.every;
+      let living = 0;
+      for (const other of world.enemies) if (other.alive && other.ownerId === boss.id) living++;
+      const n = Math.min(rule.count, rule.cap - living);
+      if (n <= 0) continue;
+      for (let i = 0; i < n; i++) {
+        const minion = makeCreep("mite", boss.route, boss.x + (Math.random() - 0.5) * 0.3, boss.y + (Math.random() - 0.5) * 0.3, 0.5);
+        minion.wpi = boss.wpi;
+        minion.travel = boss.travel;
+        minion.ownerId = boss.id;
+        world.enemies.push(minion);
+        byId.set(minion.id, minion);
+      }
+      combatTotal += n;
+      addRing(boss.x, boss.y, 0.2, 1.2, "#b78cff", 0.5);
+      burst(boss.x, boss.y, "#b78cff", 8, 1);
+      sfx("summon");
+      dirty = true;
+    }
+  }
+
+  /** Горящая земля жжёт всех наземных, кто в пятне. */
+  function updateFires(dt: number) {
+    if (!world.fires.length) return;
+    for (const fire of world.fires) {
+      fire.life -= dt;
+      const r2 = fire.radius * fire.radius;
+      for (const enemy of world.enemies) {
+        if (!enemy.alive || enemy.flying) continue;
+        const dx = enemy.x - fire.x;
+        const dy = enemy.y - fire.y;
+        if (dx * dx + dy * dy <= r2) burnEnemy(enemy, fire.dps * dt);
+      }
+    }
+    if (world.fires.some((fire) => fire.life <= 0)) world.fires = world.fires.filter((fire) => fire.life > 0);
   }
 
   function beginWave(immediate: boolean, bonus = 0) {
@@ -819,6 +1000,7 @@ export function createSim(): Sim {
     abilityShown = 0;
     aiming = false;
     world.bolts = [];
+    world.fires = [];
     world.strikes = [];
     occ.clear();
     byId.clear();
@@ -849,16 +1031,17 @@ export function createSim(): Sim {
     bannerT = 3.2;
   }
 
-  function pickTarget(tower: Tower): Creep | null {
+  /** До n целей в дальности башни, лучшие по режиму «кого бить» первыми. */
+  function pickTargets(tower: Tower, n: number): Creep[] {
     const def = TOWERS[tower.kind];
+    const hitsFlying = tower.spec === "volcano" || def.hitsFlying;
     const cx = tower.col + 0.5;
     const cy = tower.row + 0.5;
-    const r2 = def.range * def.range;
-    let best: Creep | null = null;
-    let bestScore = 0;
+    const r2 = tower.range * tower.range;
+    const found: Array<{ enemy: Creep; score: number }> = [];
     for (const enemy of world.enemies) {
       if (!enemy.alive) continue;
-      if (enemy.flying && !def.hitsFlying) continue;
+      if (enemy.flying && !hitsFlying) continue;
       const dx = enemy.x - cx;
       const dy = enemy.y - cy;
       const d2 = dx * dx + dy * dy;
@@ -868,12 +1051,15 @@ export function createSim(): Sim {
       else if (tower.target === "last") score = -enemy.travel;
       else if (tower.target === "close") score = -d2;
       else score = enemy.hp;
-      if (!best || score > bestScore) {
-        best = enemy;
-        bestScore = score;
-      }
+      found.push({ enemy, score });
     }
-    return best;
+    if (n === 1) {
+      let best: (typeof found)[number] | undefined;
+      for (const item of found) if (!best || item.score > best.score) best = item;
+      return best ? [best.enemy] : [];
+    }
+    found.sort((a, b) => b.score - a.score);
+    return found.slice(0, n).map((item) => item.enemy);
   }
 
   /** Выстрел-пустышка для урона, который не летит снарядом: молния, обвал. */
@@ -895,12 +1081,15 @@ export function createSim(): Sim {
       targetId: null,
       life: 0,
       alive: false,
+      stun: 0,
+      brittle: 0,
+      burn: 0,
       ...extra,
     };
   }
 
   /** Молния: бьёт цель и перескакивает на ближайших, теряя силу на каждом прыжке. */
-  function zap(tower: Tower, first: Creep, damage: number) {
+  function zap(tower: Tower, first: Creep, stats: ReturnType<typeof towerStats>) {
     const def = TOWERS[tower.kind];
     const pts = [
       { x: tower.col + 0.5, y: tower.row + 0.5 },
@@ -908,9 +1097,9 @@ export function createSim(): Sim {
     ];
     const hit = new Set<number>([first.id]);
     let current = first;
-    let dmg = damage;
-    hurtEnemy(first, plainShot(tower.kind, dmg, first.x, first.y, def.shot));
-    for (let jump = 0; jump < def.chain; jump++) {
+    let dmg = stats.damage;
+    hurtEnemy(first, plainShot(tower.kind, dmg, first.x, first.y, def.shot, { stun: stats.stun }));
+    for (let jump = 0; jump < stats.chain; jump++) {
       let next: Creep | null = null;
       let bestD = CHAIN_REACH * CHAIN_REACH;
       for (const enemy of world.enemies) {
@@ -925,7 +1114,7 @@ export function createSim(): Sim {
       }
       if (!next) break;
       hit.add(next.id);
-      dmg *= CHAIN_FALLOFF;
+      dmg *= stats.chainFalloff;
       pts.push({ x: next.x, y: next.y });
       hurtEnemy(next, plainShot(tower.kind, dmg, next.x, next.y, def.shot));
       current = next;
@@ -933,6 +1122,30 @@ export function createSim(): Sim {
     world.bolts.push({ pts, life: 0.2, max: 0.2 });
     if (world.bolts.length > 30) world.bolts.shift();
     for (const pt of pts.slice(1)) addFlash(pt.x, pt.y, 0.9, def.shot, 0.18);
+  }
+
+  /** Пробой: болт баллисты летит насквозь и бьёт всех на линии до края дальности. */
+  function beam(tower: Tower, target: Creep, stats: ReturnType<typeof towerStats>) {
+    const def = TOWERS[tower.kind];
+    const sx = tower.col + 0.5;
+    const sy = tower.row + 0.5;
+    const len = Math.hypot(target.x - sx, target.y - sy) || 1;
+    const ux = (target.x - sx) / len;
+    const uy = (target.y - sy) / len;
+    const reach = stats.range;
+    for (const enemy of world.enemies) {
+      if (!enemy.alive) continue;
+      const ex = enemy.x - sx;
+      const ey = enemy.y - sy;
+      const along = ex * ux + ey * uy;
+      if (along < 0 || along > reach) continue;
+      if (Math.abs(ex * uy - ey * ux) > 0.38) continue;
+      hurtEnemy(enemy, plainShot(tower.kind, stats.damage, enemy.x, enemy.y, def.shot, { pierce: true }));
+    }
+    const end = { x: sx + ux * reach, y: sy + uy * reach };
+    world.bolts.push({ pts: [{ x: sx, y: sy }, end], life: 0.22, max: 0.22, beam: def.shot });
+    if (world.bolts.length > 30) world.bolts.shift();
+    addFlash(end.x, end.y, 1, def.shot, 0.15);
   }
 
   /** Знахари лечат раненых соседей короткими импульсами. */
@@ -975,6 +1188,7 @@ export function createSim(): Sim {
         const dx = enemy.x - x;
         const dy = enemy.y - y;
         if (dx * dx + dy * dy > r2) continue;
+        enemy.shield = 0;
         hurtEnemy(enemy, plainShot("ballista", damage, x, y, "#e2b15a", { pierce: true, slow: 0.4, slowTime: 2 }));
       }
       addRing(x, y, 0.2, ABILITY_RADIUS, "#e2b15a", 0.5);
@@ -1024,6 +1238,7 @@ export function createSim(): Sim {
         rateRank: tower.rateRank,
         spent: tower.spent,
         target: tower.target,
+        spec: tower.spec,
       })),
     };
     savedRun = run;
@@ -1070,6 +1285,7 @@ export function createSim(): Sim {
           rateRank: Math.max(0, Math.min(MAX_RANK, num(t.rateRank))),
           spent: Math.max(0, num(t.spent)),
           target: ["first", "last", "close", "strong"].includes(t.target) ? t.target : "first",
+          spec: SPECS[t.kind].some((item) => item.id === t.spec) ? (t.spec as SpecId) : null,
         });
       }
       return {
@@ -1094,37 +1310,46 @@ export function createSim(): Sim {
 
   function fire(tower: Tower, target: Creep) {
     const def = TOWERS[tower.kind];
-    const boost = bannersAround(tower);
-    const damage = def.damage * dmgMult(tower.dmgRank) * (1 + BANNER_DMG * boost);
-    const rate = def.rate * rateMult(tower.rateRank) * (1 + BANNER_RATE * boost);
-    tower.cooldown += 1 / rate;
+    const stats = statsOf(tower);
+    tower.cooldown += 1 / stats.rate;
     tower.recoil = 1;
     const sx = tower.col + 0.5;
     const sy = tower.row + 0.5;
     addFlash(sx + Math.cos(tower.angle) * 0.45, sy + Math.sin(tower.angle) * 0.45, 0.9, def.shot, 0.12);
-    if (def.chain > 0) {
-      zap(tower, target, damage);
+    if (stats.chain > 0) {
+      zap(tower, target, stats);
       sfx(tower.kind);
       return;
     }
-    world.shots.push({
-      x: sx,
-      y: sy,
-      aimX: target.x,
-      aimY: target.y,
-      speed: def.shotSpeed,
-      damage,
-      splash: def.splash,
-      slow: def.slow,
-      slowTime: def.slowTime,
-      pierce: def.pierce,
-      hitsFlying: def.hitsFlying,
-      color: def.shot,
-      kind: tower.kind,
-      targetId: target.id,
-      life: 2.4,
-      alive: true,
-    });
+    if (stats.line) {
+      beam(tower, target, stats);
+      sfx(tower.kind);
+      return;
+    }
+    const targets = stats.targets > 1 ? pickTargets(tower, stats.targets) : [target];
+    for (const victim of targets.length ? targets : [target]) {
+      world.shots.push({
+        x: sx,
+        y: sy,
+        aimX: victim.x,
+        aimY: victim.y,
+        speed: def.shotSpeed,
+        damage: stats.damage,
+        splash: stats.splash,
+        slow: stats.slow,
+        slowTime: stats.slowTime,
+        pierce: stats.pierce,
+        hitsFlying: stats.hitsFlying,
+        color: def.shot,
+        kind: tower.kind,
+        targetId: victim.id,
+        life: 2.4,
+        alive: true,
+        stun: stats.stun,
+        brittle: stats.brittle,
+        burn: stats.burn,
+      });
+    }
     if (world.shots.length > 120) {
       const overflow = world.shots.findIndex((shot) => !shot.alive);
       if (overflow >= 0) world.shots.splice(overflow, 1);
@@ -1181,7 +1406,9 @@ export function createSim(): Sim {
       if (!enemy.alive) continue;
       if (enemy.slowT > 0) enemy.slowT = Math.max(0, enemy.slowT - dt);
       if (enemy.flash > 0) enemy.flash = Math.max(0, enemy.flash - dt);
-      const mult = enemy.slowT > 0 ? enemy.slow : 1;
+      if (enemy.brittleT > 0) enemy.brittleT = Math.max(0, enemy.brittleT - dt);
+      if (enemy.stun > 0) enemy.stun = Math.max(0, enemy.stun - dt);
+      const mult = enemy.stun > 0 ? 0 : enemy.slowT > 0 ? enemy.slow : 1;
       let left = enemy.speed * mult * dt;
       enemy.vx = 0;
       enemy.vy = 0;
@@ -1222,6 +1449,8 @@ export function createSim(): Sim {
     }
 
     healPulse(dt);
+    summonPulse(dt);
+    updateFires(dt);
 
     if (phase !== "combat") {
       decayFx(dt);
@@ -1233,7 +1462,7 @@ export function createSim(): Sim {
       if (TOWERS[tower.kind].aura > 0) continue;
       tower.cooldown -= dt;
       if (tower.recoil > 0) tower.recoil = Math.max(0, tower.recoil - dt * 3.2);
-      const target = pickTarget(tower);
+      const target = pickTargets(tower, 1)[0] ?? null;
       const cx = tower.col + 0.5;
       const cy = tower.row + 0.5;
       if (target) {
@@ -1299,6 +1528,10 @@ export function createSim(): Sim {
     if (world.floaters.some((floater) => floater.life <= 0)) {
       world.floaters = world.floaters.filter((floater) => floater.life > 0);
     }
+    if (phase !== "combat") {
+      for (const fire of world.fires) fire.life -= dt * 2;
+      world.fires = world.fires.filter((fire) => fire.life > 0);
+    }
     for (const item of world.bolts) item.life -= dt;
     if (world.bolts.some((item) => item.life <= 0)) world.bolts = world.bolts.filter((item) => item.life > 0);
     for (const item of world.rings) item.life -= dt;
@@ -1343,9 +1576,13 @@ export function createSim(): Sim {
       angle: -Math.PI / 2,
       recoil: 0,
       born: world.anim,
+      spec: null,
+      buff: NO_BUFF,
+      range: def.range,
     };
     world.towers.push(tower);
     occ.set(key, tower.id);
+    refreshTowers();
     selectedId = tower.id;
     burst(col + 0.5, row + 0.5, "#e2b15a", 8, 1.1);
     sfx("place");
@@ -1488,10 +1725,14 @@ export function createSim(): Sim {
           angle: -Math.PI / 2,
           recoil: 0,
           born: world.anim - 10,
+          spec: saved.spec,
+          buff: NO_BUFF,
+          range: TOWERS[saved.kind].range,
         };
         world.towers.push(tower);
         occ.set(`${tower.col},${tower.row}`, tower.id);
       }
+      refreshTowers();
       phase = "prep";
       prepLeft = null;
       banner = "Димон вернулся на стену";
@@ -1591,8 +1832,37 @@ export function createSim(): Sim {
       tower.spent += cost;
       if (track === "dmg") tower.dmgRank++;
       else tower.rateRank++;
+      refreshTowers();
       burst(tower.col + 0.5, tower.row + 0.5, "#e2b15a", 7, 1);
       sfx("upgrade");
+      saveRun();
+      flush();
+    },
+    specialize(spec) {
+      const tower = world.towers.find((item) => item.id === selectedId);
+      if (!tower || tower.spec) return;
+      if (!SPECS[tower.kind].some((item) => item.id === spec)) return;
+      if (tower.dmgRank + tower.rateRank < specNeed(tower.kind)) {
+        sfx("deny");
+        say(`Мастерство откроется после ${specNeed(tower.kind)} улучшений`);
+        return;
+      }
+      const cost = specCost(tower.kind);
+      if (!canPay(cost)) {
+        sfx("deny");
+        say("Не хватает золота");
+        return;
+      }
+      pay(cost);
+      tower.spent += cost;
+      tower.spec = spec;
+      refreshTowers();
+      const def = SPEC_BY_ID[spec];
+      burst(tower.col + 0.5, tower.row + 0.5, def.color, 14, 1.4);
+      addRing(tower.col + 0.5, tower.row + 0.5, 0.2, 1.1, def.color, 0.5);
+      sfx("spec");
+      banner = `${TOWERS[tower.kind].name}: ${def.name}`;
+      bannerT = 1.8;
       saveRun();
       flush();
     },
@@ -1604,6 +1874,7 @@ export function createSim(): Sim {
       gold += refund;
       occ.delete(`${tower.col},${tower.row}`);
       world.towers.splice(index, 1);
+      refreshTowers();
       selectedId = 0;
       float(tower.col + 0.5, tower.row + 0.3, `+${refund}`, "#e2b15a");
       sfx("coin");
