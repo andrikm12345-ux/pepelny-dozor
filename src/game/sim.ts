@@ -87,12 +87,16 @@ import {
   MAP_ORDER,
   WAVES,
   WRATH_FALL,
+  WRATH_PCT,
+  WRATH_PCT_BOSS,
+  WRATH_PCT_ELITE,
   WRATH_METEORS,
   WRATH_NEED,
   WRATH_RADIUS,
   WRATH_TIME,
   abilityDamage,
   eliteChance,
+  endlessStep,
   gateOf,
   mapHp,
   getMap,
@@ -1099,7 +1103,9 @@ export function createSim(): Sim {
   function addRage(amount: number) {
     if (phase !== "combat" || world.wrathT > 0) return;
     const was = rage;
-    rage = Math.min(WRATH_NEED, rage + amount * (has("fury") ? PERK_FURY : 1));
+    // в бесконечной ночи твари толще, убивать их дольше: гнев копится заметно быстрее
+    const late = 1 + Math.min(1.2, 0.04 * endlessStep(waveIndex));
+    rage = Math.min(WRATH_NEED, rage + amount * late * (has("fury") ? PERK_FURY : 1));
     if (was < WRATH_NEED && rage >= WRATH_NEED) {
       banner = "Гнев Димона готов";
       bannerT = 2.2;
@@ -2073,7 +2079,8 @@ export function createSim(): Sim {
         const dx = enemy.x - x;
         const dy = enemy.y - y;
         if (dx * dx + dy * dy > r2) continue;
-        hurtEnemy(enemy, plainShot("ember", damage, x, y, "#ff7a3a", { pierce: true }));
+        const pct = enemy.kind === "boss" ? WRATH_PCT_BOSS : enemy.elite ? WRATH_PCT_ELITE : WRATH_PCT;
+        hurtEnemy(enemy, plainShot("ember", Math.max(damage, enemy.maxHp * pct), x, y, "#ff7a3a", { pierce: true }));
       }
       world.fires.push({ x, y, radius: radius * 0.8, dps: damage * 0.2, life: 1.6, max: 1.6 });
       if (world.fires.length > 24) world.fires.shift();

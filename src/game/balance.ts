@@ -241,6 +241,10 @@ export const WRATH_TIME = 3.5;
 export const WRATH_METEORS = 16;
 export const WRATH_RADIUS = 1.1;
 export const WRATH_FALL = 0.5;
+/** Метеор Гнева бьёт ещё и долей максимального здоровья: в поздних волнах плоский урон ничего не значит. */
+export const WRATH_PCT = 0.14;
+export const WRATH_PCT_ELITE = 0.08;
+export const WRATH_PCT_BOSS = 0.05;
 export const WRATH_BASE = 55;
 export const WRATH_PER_WAVE = 18;
 /** Сколько гнева дают твари: обычная, элитная, босс, призванный уголёк. */
@@ -1104,7 +1108,7 @@ export function waveScale(index: number): WaveScale {
 /** Здоровье в обычных волнах: первые четыре по таблице, дальше растёт на CAMPAIGN_RAMP за волну. */
 export const CAMPAIGN_RAMP = 0.2;
 /** Во сколько раз крепчают твари за каждую волну бесконечной ночи (поверх линейной добавки). */
-export const ENDLESS_GROWTH = 1.17;
+export const ENDLESS_GROWTH = 1.1;
 
 /** Множитель карты вступает в силу постепенно: первые волны на всех картах одинаковые. */
 export function mapHp(factor: number, index: number): number {

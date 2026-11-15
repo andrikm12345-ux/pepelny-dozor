@@ -615,7 +615,7 @@ function WrathButton({
       }
       title="Гнев Димона (F) — копится за убийства; огненный дождь по тварям на всей тропе"
       onClick={onClick}
-      className="flex w-16 shrink-0 flex-col items-center gap-0.5 sm:w-20"
+      className="flex w-[4.5rem] shrink-0 flex-col items-center gap-0.5 text-center sm:w-24"
     >
       <span
         className={cx(
@@ -644,8 +644,10 @@ function WrathButton({
         />
       </span>
       <span className={cx("text-[11px] leading-tight", ready ? "font-semibold text-ember" : "text-fg")}>
-        {ready ? "Гнев готов" : on ? "Гнев!" : `Гнев ${Math.round(pct * 100)}%`}
-        <span className="ml-1 hidden text-muted sm:inline">F</span>
+        Гнев Димона
+        <span className="block text-[10px] font-normal">
+          {ready ? "готов! (F)" : on ? "идёт!" : `${Math.round(pct * 100)}%`}
+        </span>
       </span>
     </button>
   );
