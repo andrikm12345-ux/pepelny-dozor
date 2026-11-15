@@ -391,6 +391,27 @@ const TY = tr + 0.5;
   ok("старый сейв: бой идёт", s3.getSnapshot().phase === "combat");
 }
 
+// 14б. Гнев в позднюю волну: метеоры снимают долю здоровья, у босса меньше
+{
+  const wrath = (kind: EnemyKind, hp: number, elite = false) => {
+    const s = fresh();
+    arena(s);
+    const e = mk(kind, 12.5, 3.5, { hp, maxHp: hp, elite: elite ? "tough" : null });
+    s.world.enemies.push(e);
+    s.world.enemies.push(...Array.from({ length: WRATH_NEED }, () => mk("mite", 3.5, 1.5, { hp: 1, maxHp: 1 })));
+    s.toggleAim();
+    s.pointer(3, 1, "down", 3.5, 1.5);
+    run(s, 0.7, [e]);
+    s.wrath();
+    run(s, 4.5, [e]);
+    return 1 - Math.max(0, e.hp) / hp;
+  };
+  const husk = wrath("husk", 40000);
+  const boss = wrath("boss", 40000);
+  ok("гнев: метеоры снимают заметную долю здоровья толстой твари", husk > 0.25, `${(husk * 100).toFixed(0)}%`);
+  // неподвижная цель получает все 16 метеоров подряд; босс при этом не умирает, обычная толстая тварь — да
+  ok("гнев: босса метеоры не убивают, обычную тварь убивают", boss < 0.95 && boss > 0.3 && husk >= 0.99, `${(boss * 100).toFixed(0)}% против ${(husk * 100).toFixed(0)}%`);
+}
 // 15. Протяжка: выбранная башня встаёт в каждую свободную клетку, тропу и занятые клетки молча пропускает
 {
   const s = fresh();
