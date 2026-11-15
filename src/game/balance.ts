@@ -8,7 +8,18 @@ export const SELL_RATIO = 0.6;
 export const MAX_RANK = 3;
 
 export type TowerKind = "archer" | "ember" | "frost" | "ballista" | "tesla" | "banner";
-export type EnemyKind = "mite" | "runner" | "husk" | "wisp" | "healer" | "shield" | "summoner" | "boss";
+export type EnemyKind =
+  | "mite"
+  | "runner"
+  | "husk"
+  | "wisp"
+  | "healer"
+  | "shield"
+  | "summoner"
+  | "silencer"
+  | "drummer"
+  | "shade"
+  | "boss";
 export type TargetMode = "first" | "last" | "close" | "strong";
 
 export interface TowerDef {
@@ -198,6 +209,181 @@ export const FREEZE_COOLDOWN = 50;
 export const FREEZE_TIME = 2.2;
 export const FREEZE_BOSS = 0.5;
 export const FREEZE_BRITTLE = 0.2;
+
+/** Завал после Обвала: сколько секунд лежит и во сколько раз режет шаг наземных. */
+export const RUBBLE_TIME = 4;
+export const RUBBLE_SLOW = 0.5;
+
+/** Гроза Димона: молнии по самым здоровым тварям, сбивают щит и глушат. */
+export const STORM_COOLDOWN = 32;
+export const STORM_TARGETS = 6;
+export const STORM_STUN = 0.6;
+export const STORM_BASE = 60;
+export const STORM_PER_WAVE = 20;
+
+export function stormDamage(waveIndex: number): number {
+  return STORM_BASE + STORM_PER_WAVE * waveIndex;
+}
+
+/** Осколки: замороженная тварь, умирая, ранит соседей долей своего здоровья. */
+export const SHATTER_FRACTION = 0.25;
+export const SHATTER_RADIUS = 1;
+
+/** Набат Димона: башни бьют чаще и сильнее и не глушатся. */
+export const RALLY_COOLDOWN = 45;
+export const RALLY_TIME = 6;
+export const RALLY_RATE = 0.5;
+export const RALLY_DMG = 0.2;
+
+/** Гнев Димона: шкала копится за убийства, потом огненный дождь по тварям. */
+export const WRATH_NEED = 80;
+export const WRATH_TIME = 3.5;
+export const WRATH_METEORS = 16;
+export const WRATH_RADIUS = 1.1;
+export const WRATH_FALL = 0.5;
+export const WRATH_BASE = 55;
+export const WRATH_PER_WAVE = 18;
+/** Сколько гнева дают твари: обычная, элитная, босс, призванный уголёк. */
+export const RAGE_KILL = 1;
+export const RAGE_ELITE = 3;
+export const RAGE_BOSS = 15;
+export const RAGE_MINION = 0.4;
+
+export function wrathDamage(waveIndex: number): number {
+  return WRATH_BASE + WRATH_PER_WAVE * waveIndex;
+}
+
+/** Умения тварей. */
+/** Бегун: рывок после первого попадания. */
+export const DASH_TIME = 0.8;
+export const DASH_MULT = 1.6;
+/** Латник: панцирь раз в SHELL_EVERY секунд; обычный урон режется, шаг медленнее. */
+export const SHELL_EVERY = 7;
+export const SHELL_TIME = 1.6;
+export const SHELL_ARMOR = 0.15;
+export const SHELL_SPEED = 0.5;
+/** Огонёк: на половине здоровья один раз перескакивает вперёд. */
+export const BLINK_AT = 0.5;
+export const BLINK_DIST = 0.8;
+/** Глушитель: раз в SILENCE_EVERY секунд выключает ближайшую башню. */
+export const SILENCE_EVERY = 7;
+export const SILENCE_RANGE = 2.2;
+export const SILENCE_TIME = 1.8;
+/** Горнист: твари рядом идут быстрее. */
+export const HASTE_RADIUS = 1.5;
+export const HASTE_MULT = 1.18;
+/** Тень: после любого попадания видна башням столько секунд. */
+export const REVEAL_TIME = 3;
+/** Таран: рёв на этих долях здоровья. */
+export const ROAR_AT = [0.66, 0.33];
+export const ROAR_RADIUS = 3;
+export const ROAR_SILENCE = 2;
+export const ROAR_DASH = 2;
+export const ROAR_RUNNERS = 3;
+
+/** Элитные твари: редкое свойство поверх обычной твари. */
+export type AffixId = "swift" | "tough" | "regen" | "volatile";
+
+export interface AffixDef {
+  id: AffixId;
+  name: string;
+  color: string;
+}
+
+export const AFFIX_ORDER: AffixId[] = ["swift", "tough", "regen", "volatile"];
+
+export const AFFIXES: Record<AffixId, AffixDef> = {
+  swift: { id: "swift", name: "Быстрая", color: "#ffe08a" },
+  tough: { id: "tough", name: "Крепкая", color: "#ff8a6a" },
+  regen: { id: "regen", name: "Заживающая", color: "#7dff96" },
+  volatile: { id: "volatile", name: "Взрывная", color: "#c46bff" },
+};
+
+export const ELITE_SWIFT = 1.4;
+export const ELITE_TOUGH = 1.8;
+export const ELITE_REGEN = 0.025;
+export const ELITE_BLAST_RADIUS = 1.6;
+export const ELITE_BLAST_SILENCE = 1.5;
+export const ELITE_GOLD = 2;
+/** С какой волны (индекс с нуля) выходят элитные. */
+export const ELITE_FROM = 7;
+
+/** Шанс, что обычная тварь выйдет элитной. */
+export function eliteChance(index: number, difficulty: Difficulty): number {
+  if (index < ELITE_FROM) return 0;
+  const base = 0.05 + 0.01 * (index - ELITE_FROM) + (difficulty === "hard" ? 0.03 : difficulty === "easy" ? -0.02 : 0);
+  return Math.max(0, Math.min(0.22, base));
+}
+
+/** Дары Димона: один из трёх после каждой третьей волны. */
+export type PerkId =
+  | "avalanche"
+  | "aftershock"
+  | "fuse"
+  | "stormfront"
+  | "permafrost"
+  | "longbell"
+  | "fury"
+  | "marauder"
+  | "gates"
+  | "discount"
+  | "fletcher"
+  | "wires"
+  | "lantern";
+
+export interface PerkDef {
+  id: PerkId;
+  name: string;
+  blurb: string;
+}
+
+export const PERK_ORDER: PerkId[] = [
+  "avalanche",
+  "aftershock",
+  "fuse",
+  "stormfront",
+  "permafrost",
+  "longbell",
+  "fury",
+  "marauder",
+  "gates",
+  "discount",
+  "fletcher",
+  "wires",
+  "lantern",
+];
+
+export const PERK_EVERY = 3;
+export const PERK_AVALANCHE = 1.35;
+export const PERK_AFTERSHOCK = 0.5;
+export const PERK_FUSE = 0.75;
+export const PERK_STORM_TARGETS = 3;
+export const PERK_FREEZE_TIME = 1;
+export const PERK_RALLY_TIME = 3;
+export const PERK_FURY = 1.35;
+export const PERK_GOLD = 1.15;
+export const PERK_LIVES = 3;
+export const PERK_DISCOUNT = 0.9;
+export const PERK_FLETCHER = 1.15;
+export const PERK_EMBER_SPLASH = 1.15;
+export const PERK_LANTERN_SLOW = 0.85;
+export const PERK_LANTERN_SIGHT = 1;
+
+export const PERKS: Record<PerkId, PerkDef> = {
+  avalanche: { id: "avalanche", name: "Лавина", blurb: "Обвал накрывает область на треть шире." },
+  aftershock: { id: "aftershock", name: "Двойной удар", blurb: "Через секунду Обвал бьёт туда же ещё раз вполсилы." },
+  fuse: { id: "fuse", name: "Короткий фитиль", blurb: "Обвал и Гроза готовы на четверть быстрее." },
+  stormfront: { id: "stormfront", name: "Грозовой фронт", blurb: "Гроза бьёт ещё по трём тварям." },
+  permafrost: { id: "permafrost", name: "Вечная мерзлота", blurb: "Заморозка держит на секунду дольше." },
+  longbell: { id: "longbell", name: "Долгий звон", blurb: "Набат гудит на 3 секунды дольше." },
+  fury: { id: "fury", name: "Злая память", blurb: "Гнев Димона копится на треть быстрее." },
+  marauder: { id: "marauder", name: "Мародёр", blurb: "За каждую тварь на 15% больше золота." },
+  gates: { id: "gates", name: "Запасной засов", blurb: "Сразу +3 жизни." },
+  discount: { id: "discount", name: "Свой кузнец", blurb: "Башни, улучшения и мастерство на 10% дешевле." },
+  fletcher: { id: "fletcher", name: "Точёные наконечники", blurb: "Луки и Баллисты бьют на 15% сильнее." },
+  wires: { id: "wires", name: "Медные жилы", blurb: "Молния делает на прыжок больше, Костёр жжёт на 15% шире." },
+  lantern: { id: "lantern", name: "Яркий фонарь", blurb: "Фонари вяжут шаг сильнее и видят Теней на клетку дальше." },
+};
 
 /** Хрупкость и горение живут столько секунд. */
 export const BRITTLE_TIME = 3;
@@ -406,7 +592,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   runner: {
     kind: "runner",
     name: "Бегун",
-    tag: "шустрый",
+    tag: "рывок после удара",
     hp: 38,
     speed: 2.35,
     gold: 7,
@@ -418,7 +604,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   husk: {
     kind: "husk",
     name: "Латник",
-    tag: "железо",
+    tag: "броня и панцирь",
     hp: 320,
     speed: 0.72,
     gold: 14,
@@ -430,7 +616,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   wisp: {
     kind: "wisp",
     name: "Огонёк",
-    tag: "летун",
+    tag: "летун, мерцает",
     hp: 70,
     speed: 1.7,
     gold: 8,
@@ -477,10 +663,46 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     color: "#b78cff",
     summon: { every: 4, count: 2, cap: 8 },
   },
+  silencer: {
+    kind: "silencer",
+    name: "Глушитель",
+    tag: "глушит башни",
+    hp: 170,
+    speed: 0.85,
+    gold: 15,
+    armor: 0.85,
+    flying: false,
+    scale: 0.96,
+    color: "#c46bff",
+  },
+  drummer: {
+    kind: "drummer",
+    name: "Горнист",
+    tag: "ускоряет стаю",
+    hp: 160,
+    speed: 0.95,
+    gold: 13,
+    armor: 0.9,
+    flying: false,
+    scale: 0.94,
+    color: "#ffb04a",
+  },
+  shade: {
+    kind: "shade",
+    name: "Тень",
+    tag: "не видна без Фонаря",
+    hp: 120,
+    speed: 1.35,
+    gold: 11,
+    armor: 1,
+    flying: false,
+    scale: 0.84,
+    color: "#7a8cff",
+  },
   boss: {
     kind: "boss",
     name: "Таран",
-    tag: "за Димоном",
+    tag: "рёв глушит башни",
     hp: 3200,
     speed: 0.55,
     gold: 80,
@@ -563,6 +785,20 @@ for (const [index, count] of Object.entries(SUMMONERS)) {
   WAVES[Number(index)]!.push({ kind: "summoner", count, interval: 1.6 });
 }
 
+/** Горнисты с 5-й волны, Глушители с 7-й, Тени с 9-й (индекс волны с нуля). */
+const DRUMMERS: Record<number, number> = { 4: 1, 5: 1, 6: 1, 7: 1, 8: 2, 9: 2, 10: 2, 11: 2 };
+for (const [index, count] of Object.entries(DRUMMERS)) {
+  WAVES[Number(index)]!.splice(1, 0, { kind: "drummer", count, interval: 0.9 });
+}
+const SILENCERS: Record<number, number> = { 6: 1, 7: 1, 8: 1, 9: 2, 10: 2, 11: 2 };
+for (const [index, count] of Object.entries(SILENCERS)) {
+  WAVES[Number(index)]!.splice(2, 0, { kind: "silencer", count, interval: 1.2 });
+}
+const SHADES: Record<number, number> = { 8: 3, 9: 4, 10: 5, 11: 6 };
+for (const [index, count] of Object.entries(SHADES)) {
+  WAVES[Number(index)]!.push({ kind: "shade", count, interval: 0.5 });
+}
+
 export const TARGETS: { id: TargetMode; label: string }[] = [
   { id: "first", label: "Первый" },
   { id: "last", label: "Последний" },
@@ -621,7 +857,7 @@ export const MAPS: Record<MapId, MapDef> = {
       ],
     ],
     gold: 0,
-    hp: 1.1,
+    hp: 1.25,
   },
   serpent: {
     id: "serpent",
@@ -657,7 +893,7 @@ export const MAPS: Record<MapId, MapDef> = {
       ],
     ],
     gold: 250,
-    hp: 1.05,
+    hp: 0.95,
   },
   twin: {
     id: "twin",
@@ -815,7 +1051,7 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
     blurb: "Мало жизней, твари толще. Каждая башня на счету.",
     gold: 190,
     lives: 10,
-    hp: 1.25,
+    hp: 1.8,
   },
 };
 
@@ -876,8 +1112,11 @@ export function mapHp(factor: number, index: number): number {
   return 1 + (factor - 1) * t;
 }
 
+/** Общий множитель здоровья тварей: ручка баланса после того, как башни перестали копить выстрелы. */
+export const CREEP_HP = 0.55;
+
 export function campaignHp(index: number): number {
-  return 1 + CAMPAIGN_RAMP * Math.max(0, index - 3);
+  return CREEP_HP * (1 + CAMPAIGN_RAMP * Math.max(0, index - 3));
 }
 
 /** Состав волны: из таблицы или сгенерированный для бесконечной ночи. */
@@ -895,6 +1134,9 @@ export function waveSpec(index: number): SpawnGroup[] {
   groups.push({ kind: "healer", count: 2 + Math.floor(k / 2), interval: gap(0.8) });
   groups.push({ kind: "shield", count: 6 + Math.floor(k / 2), interval: gap(0.7) });
   groups.push({ kind: "summoner", count: 2 + Math.floor(k / 3), interval: gap(1.6) });
+  groups.push({ kind: "drummer", count: 2 + Math.floor(k / 4), interval: gap(0.9) });
+  groups.push({ kind: "silencer", count: 2 + Math.floor(k / 3), interval: gap(1.2) });
+  if (mix !== 3) groups.push({ kind: "shade", count: 5 + Math.floor(k / 2), interval: gap(0.5) });
   if (k % 3 === 0) groups.push({ kind: "boss", count: Math.ceil(k / 6), interval: 1.6 });
   if (mix === 2) groups.push({ kind: "husk", count: 3 + Math.floor(k / 2), interval: gap(0.5) });
   return groups;

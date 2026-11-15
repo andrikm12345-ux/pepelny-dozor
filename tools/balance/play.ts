@@ -36,6 +36,8 @@ export interface PlayResult {
   cleared: number;
   /** Жизни на момент начала каждой волны; индекс 0 — волна 1. */
   livesAtWave: number[];
+  /** Кто прорвался за партию: вид твари и сколько. */
+  leaks: Array<{ name: string; count: number }>;
 }
 
 const SPEC_PREF: Record<TowerKind, number> = { archer: 1, ember: 0, frost: 1, ballista: 0, tesla: 0, banner: 0 };
@@ -133,7 +135,11 @@ export function playGame(options: PlayOptions): PlayResult {
     const hud = sim.getSnapshot();
     if (hud.phase !== "combat") return;
     const alive = sim.world.enemies.filter((e) => e.alive);
-    if (hud.freezeLeft === 0 && (alive.length >= 10 || alive.some((e) => e.kind === "boss"))) sim.freeze();
+    const boss = alive.some((e) => e.kind === "boss");
+    if (hud.freezeLeft === 0 && (alive.length >= 10 || boss)) sim.freeze();
+    if (hud.stormLeft === 0 && (alive.length >= 5 || boss)) sim.storm();
+    if (hud.rallyLeft === 0 && (alive.length >= 12 || boss || sim.world.towers.some((t) => t.silenceT > 0))) sim.rally();
+    if (hud.rage >= hud.rageNeed && (alive.length >= 8 || boss)) sim.wrath();
     if (hud.abilityLeft === 0 && alive.length >= 6) {
       let target = alive[0]!;
       let bestN = -1;
@@ -165,14 +171,15 @@ export function playGame(options: PlayOptions): PlayResult {
       continue;
     }
     if (hud.phase === "defeat") break;
+    if (hud.perk) sim.choosePerk(Math.floor(Math.random() * hud.perk.options.length));
     if (hud.event) pickEvent(sim, options.eventPick ?? 1);
     if (options.useAbilities) abilities();
     spend();
-    if (hud.phase === "prep" && hud.prepLeft === null && !hud.event) sim.callWave();
+    if (hud.phase === "prep" && hud.prepLeft === null && !hud.event && !hud.perk) sim.callWave();
     sim.simulate(0.5);
   }
   const end = sim.getSnapshot();
-  return { won, cleared: end.cleared, livesAtWave };
+  return { won, cleared: end.cleared, livesAtWave, leaks: end.leakedKinds.map(({ name, count }) => ({ name, count })) };
 }
 
 function pickEvent(sim: Sim, pick: 0 | 1 | "random") {

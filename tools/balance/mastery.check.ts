@@ -18,7 +18,8 @@ function mk(kind: EnemyKind, x: number, y: number, extra: Partial<Creep> = {}): 
   return {
     id: uid++, kind, x, y, route: 0, wpi: 1, travel: 0, hp: def.hp, maxHp: def.hp, speed: 0, gold: 1, armor: 1,
     flying: def.flying, scale: def.scale, color: def.color, slow: 1, slowT: 0, flash: 0, alive: true, vx: 0, vy: 0,
-    iceT: 0, healT: 99, shield: def.shield ?? 0, stun: 0, brittleT: 0, brittle: 0, summonT: 99, ownerId: 0, ...extra,
+    iceT: 0, healT: 99, shield: def.shield ?? 0, stun: 0, brittleT: 0, brittle: 0, summonT: 99, ownerId: 0,
+    dashT: 0, dashed: true, shellT: 0, shellCd: 99, blinked: true, castT: 99, reveal: 0, hidden: false, haste: false, elite: null, roars: 9, ...extra,
   };
 }
 function fresh() { const s = createSim(); s.toggleCheat(); s.start(); return s; }

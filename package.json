@@ -20,7 +20,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "balance": "rolldown tools/balance/matrix.ts -o node_modules/.cache/balance/matrix.mjs -f esm --platform node && node node_modules/.cache/balance/matrix.mjs",
-    "check:mechanics": "rolldown tools/balance/mastery.check.ts -o node_modules/.cache/balance/mastery.mjs -f esm --platform node && node node_modules/.cache/balance/mastery.mjs && rolldown tools/balance/events.check.ts -o node_modules/.cache/balance/events.mjs -f esm --platform node && node node_modules/.cache/balance/events.mjs"
+    "check:mechanics": "rolldown tools/balance/mastery.check.ts -o node_modules/.cache/balance/mastery.mjs -f esm --platform node && node node_modules/.cache/balance/mastery.mjs && rolldown tools/balance/events.check.ts -o node_modules/.cache/balance/events.mjs -f esm --platform node && node node_modules/.cache/balance/events.mjs && rolldown tools/balance/abilities.check.ts -o node_modules/.cache/balance/abilities.mjs -f esm --platform node && node node_modules/.cache/balance/abilities.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
