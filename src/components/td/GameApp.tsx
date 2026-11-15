@@ -245,11 +245,11 @@ export function GameApp() {
             {hud.paused ? <Play className="size-4" /> : <Pause className="size-4" />}
           </IconButton>
           <IconButton
-            label={hud.speed === 1 ? "Ускорить" : "Обычная скорость"}
+            label={hud.speed === 5 ? "Обычная скорость" : `Скорость ${hud.speed}×, нажми для следующей`}
             onClick={sim.toggleSpeed}
             disabled={ended}
           >
-            <span className="text-xs font-semibold">{hud.speed === 1 ? "1×" : "2×"}</span>
+            <span className="text-xs font-semibold">{hud.speed}×</span>
           </IconButton>
           <IconButton
             label={hud.cheat ? "Выключить чит" : "Чит: бесконечное золото"}

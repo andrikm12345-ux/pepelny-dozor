@@ -578,7 +578,7 @@ export interface Hud {
   aiming: boolean;
   savedRun: RunSummary | null;
   paused: boolean;
-  speed: 1 | 2;
+  speed: 1 | 2 | 3 | 5;
   muted: boolean;
   build: TowerKind | null;
   selection: SelectionView | null;
@@ -680,7 +680,7 @@ export function createSim(): Sim {
   let aiming = false;
   let savedRun: SavedRun | null = null;
   let paused = false;
-  let speed: 1 | 2 = 1;
+  let speed: 1 | 2 | 3 | 5 = 1;
   let muted = false;
   let cheat = false;
   /** Чит включали в этом забеге — рекорды не пишем. */
@@ -2768,7 +2768,8 @@ export function createSim(): Sim {
       flush();
     },
     toggleSpeed() {
-      speed = speed === 1 ? 2 : 1;
+      // 1× → 2× → 3× → 5× → снова 1×
+      speed = speed === 1 ? 2 : speed === 2 ? 3 : speed === 3 ? 5 : 1;
       flush();
     },
     toggleCheat() {
@@ -3142,12 +3143,12 @@ export function createSim(): Sim {
       acc += capped * speed * scale;
       const step = 1 / 60;
       let guard = 0;
-      while (acc >= step && guard < 12) {
+      while (acc >= step && guard < 30) {
         tick(step);
         acc -= step;
         guard++;
       }
-      if (guard === 12) acc = 0;
+      if (guard === 30) acc = 0;
       if (dirty) flush();
     },
     simulate(seconds) {
