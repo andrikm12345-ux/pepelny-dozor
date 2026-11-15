@@ -2082,14 +2082,15 @@ export function createSim(): Sim {
         const pct = enemy.kind === "boss" ? WRATH_PCT_BOSS : enemy.elite ? WRATH_PCT_ELITE : WRATH_PCT;
         hurtEnemy(enemy, plainShot("ember", Math.max(damage, enemy.maxHp * pct), x, y, "#ff7a3a", { pierce: true }));
       }
-      world.fires.push({ x, y, radius: radius * 0.8, dps: damage * 0.2, life: 1.6, max: 1.6 });
+      world.fires.push({ x, y, radius: radius * 0.8, dps: damage * 0.5, life: 1.6, max: 1.6 });
       if (world.fires.length > 24) world.fires.shift();
-      addRing(x, y, 0.2, radius, "#ff8a4a", 0.45);
-      addFlash(x, y, 3.2, "#ff9a4a", 0.45);
-      burst(x, y, "#ffb35a", 12, 2.2);
-      burst(x, y, "#6b5a50", 6, 1.4);
-      addDecal(x, y, 1.3);
-      world.shake = Math.min(1, world.shake + 0.22);
+      addRing(x, y, 0.2, radius, "#ff8a4a", 0.4);
+      // сто метеоров: вспышку света даём не каждому, иначе холст не успевает
+      if (Math.random() < 0.3) addFlash(x, y, 2.4, "#ff9a4a", 0.3);
+      burst(x, y, "#ffb35a", 4, 2);
+      burst(x, y, "#6b5a50", 2, 1.2);
+      addDecal(x, y, 0.9);
+      world.shake = Math.min(1, world.shake + 0.05);
       sfx("boom");
     }
     dirty = true;

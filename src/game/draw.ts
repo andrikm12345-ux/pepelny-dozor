@@ -887,8 +887,8 @@ export function createRenderer(): Renderer {
       const mx = x + drop * 0.45;
       const my = y - drop;
       ctx.globalCompositeOperation = "lighter";
-      for (let i = 1; i <= 5; i++) {
-        blot(ctx, "rgba(255, 110, 40, 1)", mx + i * cell * 0.11, my - i * cell * 0.24, cell * (0.34 - i * 0.045), 0.5 - i * 0.07);
+      for (let i = 1; i <= 3; i++) {
+        blot(ctx, "rgba(255, 110, 40, 1)", mx + i * cell * 0.15, my - i * cell * 0.32, cell * (0.32 - i * 0.07), 0.55 - i * 0.12);
       }
       blot(ctx, "rgba(255, 110, 40, 1)", mx, my, cell * 0.5, 0.95);
       blot(ctx, "rgba(255, 230, 160, 1)", mx, my, cell * 0.22, 1);
@@ -1570,7 +1570,8 @@ export function createRenderer(): Renderer {
       lights.push(["rgba(255, 150, 70, 1)", torch.x, torch.y - cell * 0.2, cell * (1.55 + Math.sin(anim * 10 + i * 2.1) * 0.07), 0.42]);
     }
     for (const meteor of world.meteors) {
-      lights.push(["rgba(255, 130, 60, 1)", ox + meteor.x * cell, oy + meteor.y * cell, cell * 2.2, 0.5]);
+      // летящий метеор светит дальше всего у земли; светить каждый сразу — слишком дорого при сотне
+      if (meteor.t < 0.2) lights.push(["rgba(255, 130, 60, 1)", ox + meteor.x * cell, oy + meteor.y * cell, cell * 1.6, 0.4]);
     }
     for (const tower of world.towers) {
       const { x, y } = towerCenter(tower, board);
