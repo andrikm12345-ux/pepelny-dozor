@@ -1,5 +1,5 @@
-import { ABILITY_RADIUS, COLS, ENEMIES, ROWS, SPEC_BY_ID, TOWERS, gateOf, isRoad, type GameMap, type Waypoint } from "./balance";
-import type { Bolt, Creep, Shot, Tower, World } from "./sim";
+import { AFFIXES, COLS, ENEMIES, HASTE_RADIUS, ROAR_AT, ROWS, SPEC_BY_ID, TOWERS, gateOf, isRoad, type GameMap, type Waypoint } from "./balance";
+import type { Bolt, Corpse, Creep, Shot, Tower, World } from "./sim";
 
 export interface Board {
   cell: number;
@@ -118,7 +118,11 @@ export function createRenderer(): Renderer {
   let light: HTMLCanvasElement | null = null;
   const glows = new Map<string, HTMLCanvasElement>();
   const trails = new WeakMap<Shot, Pt[]>();
+  /** Показанное здоровье твари: догоняет настоящее, чтобы был виден кусок урона. */
+  const shownHp = new WeakMap<Creep, number>();
   let lastAnim = -1;
+  let cracks: HTMLCanvasElement | null = null;
+  let torches: Pt[] = [];
 
   const motes: Mote[] = Array.from({ length: 48 }, (_, i) => {
     const ember = i % 4 === 0;
@@ -201,8 +205,25 @@ export function createRenderer(): Renderer {
     g.lineWidth = 1;
     g.stroke();
 
-    const gap = Math.max(1, cell * 0.06);
-    const radius = Math.max(2, cell * 0.14);
+    // пепельный грунт: крупные пятна тёплого и холодного тона под плитами
+    g.save();
+    round(g, ox - cell * 0.12, oy - cell * 0.12, cell * COLS + cell * 0.24, cell * ROWS + cell * 0.24, cell * 0.3);
+    g.clip();
+    for (let i = 0; i < 46; i++) {
+      const px = ox + hash(i, 1, 90) * cell * COLS;
+      const py = oy + hash(i, 2, 91) * cell * ROWS;
+      const pr = cell * (1.2 + hash(i, 3, 92) * 2.6);
+      const warm = hash(i, 4, 93) > 0.55;
+      const grad = g.createRadialGradient(px, py, 0, px, py, pr);
+      grad.addColorStop(0, warm ? "rgba(92, 62, 40, 0.34)" : "rgba(46, 70, 62, 0.36)");
+      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      g.fillStyle = grad;
+      g.fillRect(px - pr, py - pr, pr * 2, pr * 2);
+    }
+    g.restore();
+
+    const gap = Math.max(1, cell * 0.045);
+    const radius = Math.max(2, cell * 0.16);
     for (let row = 0; row < ROWS; row++) {
       for (let col = 0; col < COLS; col++) {
         if (isRoad(map, col, row)) continue;
@@ -210,13 +231,54 @@ export function createRenderer(): Renderer {
         const x = ox + col * cell + gap;
         const y = oy + row * cell + gap;
         const s = cell - gap * 2;
-        const tone = n > 0.5 ? [30, 41, 36] : [35, 47, 41];
-        const stone = g.createLinearGradient(x, y, x, y + s);
-        stone.addColorStop(0, `rgb(${tone[0] + 8}, ${tone[1] + 9}, ${tone[2] + 8})`);
-        stone.addColorStop(1, `rgb(${tone[0] - 6}, ${tone[1] - 7}, ${tone[2] - 6})`);
+        // плита полупрозрачная: сквозь неё проступают пятна грунта, тон у каждой свой
+        const shade = 0.5 + hash(col, row, 95) * 0.5;
+        const tone = n > 0.66 ? [44, 52, 44] : n > 0.33 ? [36, 48, 42] : [48, 44, 38];
+        const stone = g.createLinearGradient(x, y, x + s * 0.3, y + s);
+        stone.addColorStop(0, `rgba(${tone[0] + 14}, ${tone[1] + 15}, ${tone[2] + 13}, ${0.62 + shade * 0.2})`);
+        stone.addColorStop(1, `rgba(${tone[0] - 12}, ${tone[1] - 13}, ${tone[2] - 12}, ${0.72 + shade * 0.2})`);
         g.fillStyle = stone;
         round(g, x, y, s, s, radius);
         g.fill();
+        // сколотый угол у части плит
+        if (hash(col, row, 96) > 0.72) {
+          const corner = Math.floor(hash(col, row, 97) * 4);
+          const cx0 = x + (corner % 2 ? s : 0);
+          const cy0 = y + (corner > 1 ? s : 0);
+          g.fillStyle = "rgba(8, 11, 9, 0.85)";
+          g.beginPath();
+          g.moveTo(cx0, cy0);
+          g.lineTo(cx0 + (corner % 2 ? -1 : 1) * s * (0.2 + hash(col, row, 98) * 0.14), cy0);
+          g.lineTo(cx0, cy0 + (corner > 1 ? -1 : 1) * s * (0.2 + hash(col, row, 99) * 0.14));
+          g.closePath();
+          g.fill();
+        }
+        // камешки и кости
+        const junk = hash(col, row, 100);
+        if (junk > 0.8) {
+          for (let k = 0; k < 3; k++) {
+            g.fillStyle = k % 2 ? "rgba(140, 128, 110, 0.5)" : "rgba(20, 24, 21, 0.7)";
+            g.beginPath();
+            g.ellipse(x + s * (0.2 + hash(col, row, 101 + k) * 0.6), y + s * (0.25 + hash(col, row, 104 + k) * 0.55), s * 0.045, s * 0.032, hash(col, row, 107 + k) * 3, 0, Math.PI * 2);
+            g.fill();
+          }
+        } else if (junk < 0.07) {
+          const bx0 = x + s * 0.3;
+          const by0 = y + s * 0.62;
+          g.strokeStyle = "rgba(200, 192, 170, 0.5)";
+          g.lineWidth = Math.max(1.2, cell * 0.035);
+          g.lineCap = "round";
+          g.beginPath();
+          g.moveTo(bx0, by0);
+          g.lineTo(bx0 + s * 0.34, by0 - s * 0.12);
+          g.stroke();
+          g.fillStyle = "rgba(200, 192, 170, 0.5)";
+          for (const [dx, dy] of [[0, 0], [0.34, -0.12]] as const) {
+            g.beginPath();
+            g.arc(bx0 + s * dx, by0 + s * dy, cell * 0.035, 0, Math.PI * 2);
+            g.fill();
+          }
+        }
         // светлая кромка сверху и тёмная снизу — камень выпуклый
         g.strokeStyle = "rgba(255, 255, 255, 0.05)";
         g.lineWidth = 1;
@@ -275,10 +337,13 @@ export function createRenderer(): Renderer {
     g.lineCap = "round";
     g.lineJoin = "round";
     const layers: Array<[string, number]> = [
-      ["#140d09", 1.0],
-      ["#3f2c22", 0.78],
-      ["#5a4031", 0.48],
-      ["rgba(255, 220, 170, 0.05)", 0.18],
+      ["rgba(0, 0, 0, 0.55)", 1.16],
+      ["#0f0a07", 1.0],
+      ["#2e2019", 0.86],
+      ["#463226", 0.7],
+      ["#5d4333", 0.46],
+      ["#6b4e3b", 0.2],
+      ["rgba(255, 220, 170, 0.06)", 0.08],
     ];
     for (const [color, widthK] of layers) {
       g.strokeStyle = color;
@@ -304,6 +369,78 @@ export function createRenderer(): Renderer {
         g.beginPath();
         g.ellipse(px, py, r * 1.3, r, hash(i, k, 43) * Math.PI, 0, Math.PI * 2);
         g.fill();
+      }
+      // бордюрные камни по обеим кромкам
+      const kerb = Math.floor(len / (cell * 0.34));
+      for (let k = 0; k < kerb; k++) {
+        for (const side of [-1, 1]) {
+          if (hash(i, k, 44 + side) < 0.25) continue;
+          const t = (k + 0.5) / kerb;
+          const off = side * cell * (0.47 + hash(i, k, 46 + side) * 0.05);
+          const px = a.x + (b.x - a.x) * t + nx * off;
+          const py = a.y + (b.y - a.y) * t + ny * off;
+          const r = cell * (0.055 + hash(i, k, 48 + side) * 0.04);
+          g.fillStyle = "rgba(10, 8, 6, 0.6)";
+          g.beginPath();
+          g.ellipse(px + 1, py + 2, r * 1.2, r * 0.9, 0, 0, Math.PI * 2);
+          g.fill();
+          const lum = 62 + Math.floor(hash(i, k, 50 + side) * 34);
+          g.fillStyle = `rgb(${lum + 10}, ${lum + 2}, ${lum - 8})`;
+          g.beginPath();
+          g.ellipse(px, py, r * 1.2, r * 0.9, hash(i, k, 52 + side) * Math.PI, 0, Math.PI * 2);
+          g.fill();
+          g.fillStyle = "rgba(255, 240, 215, 0.14)";
+          g.beginPath();
+          g.ellipse(px - r * 0.25, py - r * 0.3, r * 0.5, r * 0.3, 0, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+      // угли на тропе
+      for (let k = 0; k < Math.floor(len / (cell * 1.1)); k++) {
+        const t = hash(i, k, 55);
+        const side = (hash(i, k, 56) - 0.5) * cell * 0.5;
+        g.fillStyle = "rgba(226, 91, 58, 0.55)";
+        g.fillRect(a.x + (b.x - a.x) * t + nx * side, a.y + (b.y - a.y) * t + ny * side, 1.6, 1.6);
+      }
+    }
+
+    // факелы стоят на внешней стороне каждого поворота, у кромки тропы
+    torches = [];
+    for (const points of map.routes) {
+      for (let i = 1; i < points.length - 1; i++) {
+        const prev = points[i - 1]!;
+        const cur = points[i]!;
+        const next = points[i + 1]!;
+        const ix = Math.sign(cur.x - prev.x) - Math.sign(next.x - cur.x);
+        const iy = Math.sign(cur.y - prev.y) - Math.sign(next.y - cur.y);
+        if (!ix && !iy) continue;
+        torches.push({ x: ox + (cur.x + ix * 0.46) * cell, y: oy + (cur.y + iy * 0.46) * cell });
+      }
+    }
+
+    // слой тлеющих трещин: рисуется один раз, в кадре только меняет яркость
+    cracks = makeCanvas(width * dpr, height * dpr);
+    const c = cracks.getContext("2d")!;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.lineCap = "round";
+    c.lineJoin = "round";
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        if (isRoad(map, col, row) || hash(col, row, 110) < 0.9) continue;
+        const pts: Pt[] = [];
+        let cx = ox + (col + 0.15 + hash(col, row, 111) * 0.3) * cell;
+        let cy = oy + (row + 0.15 + hash(col, row, 112) * 0.2) * cell;
+        pts.push({ x: cx, y: cy });
+        for (let k = 0; k < 4; k++) {
+          cx += (0.1 + hash(col + k, row, 113) * 0.16) * cell;
+          cy += (hash(col, row + k, 114) - 0.25) * cell * 0.34;
+          pts.push({ x: cx, y: cy });
+        }
+        for (const [color, w] of [["rgba(226, 70, 30, 0.5)", 0.11], ["rgba(255, 150, 60, 0.9)", 0.035]] as const) {
+          c.strokeStyle = color;
+          c.lineWidth = Math.max(1, cell * w);
+          strokePath(c, pts);
+        }
       }
     }
     return canvas;
@@ -421,6 +558,50 @@ export function createRenderer(): Renderer {
     }
     ctx.globalAlpha = 1;
 
+    // тлеющие трещины: готовый слой, который дышит
+    if (cracks) {
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = reduceMotion ? 0.55 : 0.45 + Math.sin(world.anim * 1.3) * 0.2;
+      ctx.drawImage(cracks, 0, 0, width, height);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
+
+    // завалы после Обвала: груда камней, которая оседает
+    for (const pile of world.rubble) {
+      const k = clamp01(pile.life / pile.max);
+      const x = ox + pile.x * cell;
+      const y = oy + pile.y * cell;
+      ctx.globalAlpha = Math.min(1, k * 3) * 0.9;
+      ctx.fillStyle = "rgba(20, 15, 11, 0.55)";
+      ctx.beginPath();
+      ctx.ellipse(x, y, pile.radius * cell, pile.radius * cell * 0.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      for (let i = 0; i < 16; i++) {
+        const a = hash(i, pile.x * 9, 61) * Math.PI * 2;
+        const d = Math.sqrt(hash(i, pile.y * 9, 62)) * pile.radius * cell * 0.85;
+        const r = cell * (0.07 + hash(i, 3, 63) * 0.11);
+        const px = x + Math.cos(a) * d;
+        const py = y + Math.sin(a) * d * 0.8;
+        ctx.fillStyle = i % 3 === 0 ? "#6f6253" : i % 3 === 1 ? "#4a4036" : "#8a7a68";
+        ctx.beginPath();
+        ctx.moveTo(px - r, py + r * 0.5);
+        ctx.lineTo(px - r * 0.3, py - r);
+        ctx.lineTo(px + r * 0.8, py - r * 0.5);
+        ctx.lineTo(px + r, py + r * 0.6);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.strokeStyle = "rgba(226, 177, 90, 0.5)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.arc(x, y, pile.radius * cell * k, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
+
     // горящая земля после Пекла
     if (world.fires.length) {
       ctx.globalCompositeOperation = "lighter";
@@ -445,14 +626,17 @@ export function createRenderer(): Renderer {
 
     for (const ribbon of ribbons) drawPortal(ctx, ribbon[1]!.x, ribbon[1]!.y, cell, anim);
     const gate = gateOf(world.map);
-    drawGate(ctx, ox + gate.x * cell, oy + gate.y * cell, cell, anim);
+    drawGate(ctx, ox + gate.x * cell, oy + gate.y * cell, cell, anim, world.livesMax > 0 ? clamp01(world.lives / world.livesMax) : 1);
 
     // башни сверху вниз, чтобы нижние перекрывали верхние
     const towers = [...world.towers].sort((a, b) => a.row - b.row);
     for (const tower of towers) drawTower(ctx, tower, board, sprites, world, reduceMotion);
 
+    drawTorches(ctx, cell, anim);
+    for (const corpse of world.corpses) drawCorpse(ctx, corpse, board, sprites);
     const ordered = world.enemies.filter((enemy) => enemy.alive).sort((a, b) => a.y - b.y);
     for (const enemy of ordered) drawEnemy(ctx, enemy, board, sprites, anim);
+    drawMeteors(ctx, world, board);
 
     drawShots(ctx, world, board);
     for (const bolt of world.bolts) drawBolt(ctx, bolt, board);
@@ -477,6 +661,34 @@ export function createRenderer(): Renderer {
       const grad = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.2, width / 2, height / 2, Math.max(width, height) * 0.7);
       grad.addColorStop(0, `rgba(190, 230, 255, ${0.1 * k})`);
       grad.addColorStop(1, `rgba(120, 190, 240, ${0.35 * k})`);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    // Гнев Димона: огненный отсвет по краям; Гроза: короткая белая вспышка
+    if (world.wrathT > 0) {
+      const k = Math.min(1, world.wrathT * 2) * (0.75 + Math.sin(world.anim * 9) * 0.1);
+      const grad = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.25, width / 2, height / 2, Math.max(width, height) * 0.75);
+      grad.addColorStop(0, "rgba(255, 120, 50, 0)");
+      grad.addColorStop(1, `rgba(255, 90, 30, ${0.4 * k})`);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalCompositeOperation = "source-over";
+    }
+    if (world.stormT > 0 && !reduceMotion) {
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = `rgba(190, 225, 255, ${Math.min(0.28, world.stormT * 0.7)})`;
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalCompositeOperation = "source-over";
+    }
+    if (world.rallyT > 0) {
+      const k = Math.min(1, world.rallyT) * (0.6 + Math.sin(world.anim * 6) * 0.15);
+      const grad = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.35, width / 2, height / 2, Math.max(width, height) * 0.75);
+      grad.addColorStop(0, "rgba(255, 216, 138, 0)");
+      grad.addColorStop(1, `rgba(255, 200, 110, ${0.18 * k})`);
       ctx.globalCompositeOperation = "lighter";
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, width, height);
@@ -542,6 +754,81 @@ export function createRenderer(): Renderer {
     if (world.hurt > 0.02) drawHurt(ctx, width, height, world.hurt);
   }
 
+  /** Факелы на поворотах тропы: столбик, пламя из трёх языков, искры. */
+  function drawTorches(ctx: CanvasRenderingContext2D, cell: number, anim: number) {
+    for (let i = 0; i < torches.length; i++) {
+      const { x, y } = torches[i]!;
+      ctx.fillStyle = "#1b1410";
+      ctx.fillRect(x - cell * 0.03, y - cell * 0.1, cell * 0.06, cell * 0.3);
+      ctx.fillStyle = "#3a2c22";
+      ctx.fillRect(x - cell * 0.06, y - cell * 0.14, cell * 0.12, cell * 0.06);
+      const flick = Math.sin(anim * 11 + i * 2.3) * 0.5 + Math.sin(anim * 17 + i) * 0.5;
+      ctx.globalCompositeOperation = "lighter";
+      blot(ctx, "rgba(255, 120, 40, 1)", x, y - cell * 0.22, cell * (0.3 + flick * 0.03), 0.75);
+      blot(ctx, "rgba(255, 215, 130, 1)", x + flick * cell * 0.015, y - cell * 0.24, cell * 0.13, 0.95);
+      for (let k = 0; k < 2; k++) {
+        const t = (anim * 0.9 + i * 0.37 + k * 0.5) % 1;
+        ctx.globalAlpha = (1 - t) * 0.9;
+        ctx.fillStyle = "#ffb35a";
+        ctx.fillRect(x + Math.sin(t * 9 + i + k * 3) * cell * 0.08, y - cell * (0.3 + t * 0.55), 1.6, 1.6);
+      }
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** Останки: спрайт светлеет, оседает и рассыпается угольками. */
+  function drawCorpse(ctx: CanvasRenderingContext2D, corpse: Corpse, board: Board, sprites: Record<string, HTMLImageElement>) {
+    const { cell, ox, oy } = board;
+    const t = 1 - clamp01(corpse.life / corpse.max);
+    const x = ox + corpse.x * cell;
+    const y = oy + corpse.y * cell - (corpse.flying ? cell * 0.1 : 0) + t * cell * 0.12;
+    const size = cell * corpse.scale * 1.12 * (1 - t * 0.35);
+    ctx.globalAlpha = (1 - t) * 0.85;
+    drawSprite(ctx, sprites[corpse.kind], x, y, size, corpse.flip, 1 - t * 0.5, t * 0.5);
+    ctx.globalCompositeOperation = "lighter";
+    blot(ctx, "rgba(255, 150, 80, 1)", x, y, size * (0.4 + t * 0.4), (1 - t) * 0.6);
+    for (let k = 0; k < 7; k++) {
+      const a = hash(k, corpse.x * 13, 71) * Math.PI * 2;
+      const d = t * cell * (0.25 + hash(k, corpse.y * 13, 72) * 0.5);
+      ctx.globalAlpha = (1 - t) * 0.9;
+      ctx.fillStyle = k % 2 ? "#ffb35a" : corpse.color;
+      ctx.fillRect(x + Math.cos(a) * d, y + Math.sin(a) * d - t * cell * 0.25, 2, 2);
+    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+  }
+
+  /** Метеоры Гнева: тень-прицел на земле и огненный шар с хвостом, падающий наискось. */
+  function drawMeteors(ctx: CanvasRenderingContext2D, world: World, board: Board) {
+    const { cell, ox, oy } = board;
+    for (const meteor of world.meteors) {
+      const k = 1 - clamp01(meteor.t / meteor.max);
+      const x = ox + meteor.x * cell;
+      const y = oy + meteor.y * cell;
+      ctx.strokeStyle = `rgba(255, 120, 60, ${0.35 + 0.5 * k})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, meteor.radius * cell * (1 - 0.5 * k), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(255, 90, 40, ${0.08 + 0.12 * k})`;
+      ctx.beginPath();
+      ctx.arc(x, y, meteor.radius * cell, 0, Math.PI * 2);
+      ctx.fill();
+      const drop = (1 - k) * cell * 5;
+      const mx = x + drop * 0.45;
+      const my = y - drop;
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 1; i <= 5; i++) {
+        blot(ctx, "rgba(255, 110, 40, 1)", mx + i * cell * 0.11, my - i * cell * 0.24, cell * (0.34 - i * 0.045), 0.5 - i * 0.07);
+      }
+      blot(ctx, "rgba(255, 110, 40, 1)", mx, my, cell * 0.5, 0.95);
+      blot(ctx, "rgba(255, 230, 160, 1)", mx, my, cell * 0.22, 1);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
+  }
+
   function drawHurt(ctx: CanvasRenderingContext2D, width: number, height: number, hurt: number) {
     const r = Math.hypot(width, height) / 2;
     const grad = ctx.createRadialGradient(width / 2, height / 2, r * 0.35, width / 2, height / 2, r);
@@ -563,7 +850,8 @@ export function createRenderer(): Renderer {
     const { cell } = board;
     const def = TOWERS[tower.kind];
     const { x, y } = towerCenter(tower, board);
-    const grow = reduceMotion ? 1 : easeOutBack(clamp01((world.anim - tower.born) / 0.4));
+    const breathe = reduceMotion ? 1 : 1 + Math.sin(world.anim * 1.7 + tower.id * 1.3) * 0.012;
+    const grow = (reduceMotion ? 1 : easeOutBack(clamp01((world.anim - tower.born) / 0.4))) * breathe;
     const kick = tower.recoil * cell * 0.06;
     const bx = x - Math.cos(tower.angle) * kick;
     const by = y - Math.sin(tower.angle) * kick;
@@ -597,12 +885,56 @@ export function createRenderer(): Renderer {
       ctx.globalAlpha = 1;
     }
 
-    if (!drawSprite(ctx, sprites[tower.kind], bx, by, size, false)) {
+    if (world.rallyT > 0 && def.aura <= 0) {
+      ctx.globalCompositeOperation = "lighter";
+      blot(ctx, "rgba(255, 216, 138, 1)", x, y, cell * (0.75 + Math.sin(world.anim * 8 + tower.id) * 0.06), 0.4);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
+    const sway = tower.kind === "banner" && !reduceMotion ? Math.sin(world.anim * 2.4 + tower.id) * 0.05 : 0;
+    const silenced = tower.silenceT > 0;
+    if (silenced) ctx.globalAlpha = 0.55;
+    if (!drawSprite(ctx, sprites[tower.kind], bx, by, size, false, 1, sway)) {
       fallbackTower(ctx, bx, by, cell * 0.42 * grow, def.shot);
+    }
+    ctx.globalAlpha = 1;
+    if (!reduceMotion && !silenced) towerLife(ctx, tower, bx, by, cell, world.anim);
+    // вспышка у дула в момент выстрела
+    if (tower.recoil > 0.55 && def.damage > 0 && tower.kind !== "tesla") {
+      const fx = bx + Math.cos(tower.angle) * cell * 0.5;
+      const fy = by + Math.sin(tower.angle) * cell * 0.5;
+      ctx.globalCompositeOperation = "lighter";
+      blot(ctx, def.shot, fx, fy, cell * 0.42 * tower.recoil, 0.9);
+      blot(ctx, "rgba(255,255,255,1)", fx, fy, cell * 0.16 * tower.recoil, 1);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
+    if (silenced) {
+      // цепь глушения: два звена крест-накрест и лиловая дымка
+      ctx.globalCompositeOperation = "lighter";
+      blot(ctx, "rgba(196, 107, 255, 1)", x, y, cell * 0.7, 0.35 + Math.sin(world.anim * 10) * 0.08);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "#d9a8ff";
+      ctx.lineWidth = Math.max(2, cell * 0.06);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(x - cell * 0.32, y - cell * 0.3);
+      ctx.lineTo(x + cell * 0.32, y + cell * 0.3);
+      ctx.moveTo(x + cell * 0.32, y - cell * 0.3);
+      ctx.lineTo(x - cell * 0.32, y + cell * 0.3);
+      ctx.stroke();
+      ctx.fillStyle = "#1a0f24";
+      ctx.strokeStyle = "#d9a8ff";
+      ctx.lineWidth = Math.max(1.5, cell * 0.04);
+      ctx.beginPath();
+      ctx.arc(x, y, cell * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
     }
 
     // ствол смотрит на цель
-    if (def.damage > 0 && tower.kind !== "tesla") {
+    if (def.damage > 0 && tower.kind !== "tesla" && !silenced) {
       const ax = bx + Math.cos(tower.angle) * cell * 0.46;
       const ay = by + Math.sin(tower.angle) * cell * 0.46;
       ctx.strokeStyle = def.shot;
@@ -656,6 +988,56 @@ export function createRenderer(): Renderer {
     }
   }
 
+  /** Жизнь башни в покое: пламя Костра, блики Фонаря, разряды Молнии. */
+  function towerLife(ctx: CanvasRenderingContext2D, tower: Tower, x: number, y: number, cell: number, anim: number) {
+    ctx.globalCompositeOperation = "lighter";
+    if (tower.kind === "ember") {
+      const flick = Math.sin(anim * 13 + tower.id) * 0.5 + Math.sin(anim * 7.3 + tower.id * 2) * 0.5;
+      blot(ctx, "rgba(255, 110, 40, 1)", x, y - cell * 0.3, cell * (0.3 + flick * 0.04), 0.7);
+      blot(ctx, "rgba(255, 220, 140, 1)", x + flick * cell * 0.02, y - cell * 0.34, cell * 0.13, 0.9);
+      for (let k = 0; k < 3; k++) {
+        const t = (anim * 0.8 + tower.id * 0.31 + k / 3) % 1;
+        ctx.globalAlpha = (1 - t) * 0.9;
+        ctx.fillStyle = "#ffb35a";
+        ctx.fillRect(x + Math.sin(t * 8 + k * 2 + tower.id) * cell * 0.12, y - cell * (0.36 + t * 0.6), 1.8, 1.8);
+      }
+    } else if (tower.kind === "frost") {
+      blot(ctx, "rgba(158, 196, 212, 1)", x, y - cell * 0.12, cell * (0.34 + Math.sin(anim * 2.2 + tower.id) * 0.04), 0.45);
+      ctx.strokeStyle = "#e8f8ff";
+      ctx.lineWidth = 1.2;
+      for (let k = 0; k < 3; k++) {
+        const t = (anim * 0.5 + k / 3 + tower.id * 0.17) % 1;
+        const a = k * 2.1 + tower.id;
+        const sx = x + Math.cos(a) * cell * 0.34;
+        const sy = y - cell * 0.1 + Math.sin(a) * cell * 0.26 - t * cell * 0.15;
+        const r = cell * 0.045 * Math.sin(t * Math.PI);
+        ctx.globalAlpha = Math.sin(t * Math.PI);
+        ctx.beginPath();
+        ctx.moveTo(sx - r, sy);
+        ctx.lineTo(sx + r, sy);
+        ctx.moveTo(sx, sy - r);
+        ctx.lineTo(sx, sy + r);
+        ctx.stroke();
+      }
+    } else if (tower.kind === "tesla") {
+      blot(ctx, "rgba(143, 214, 255, 1)", x, y - cell * 0.3, cell * (0.22 + Math.sin(anim * 9 + tower.id) * 0.03), 0.6);
+      const frame = Math.floor(anim * 14) + tower.id;
+      if (frame % 3 === 0) {
+        ctx.strokeStyle = "#dff4ff";
+        ctx.lineWidth = 1.2;
+        ctx.globalAlpha = 0.9;
+        const a = hash(frame, 1, 81) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(x, y - cell * 0.3);
+        ctx.lineTo(x + Math.cos(a) * cell * 0.14 + (hash(frame, 2, 82) - 0.5) * cell * 0.1, y - cell * 0.3 + Math.sin(a) * cell * 0.14);
+        ctx.lineTo(x + Math.cos(a) * cell * 0.3, y - cell * 0.3 + Math.sin(a) * cell * 0.3);
+        ctx.stroke();
+      }
+    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+  }
+
   function drawEnemy(
     ctx: CanvasRenderingContext2D,
     enemy: Creep,
@@ -665,8 +1047,69 @@ export function createRenderer(): Renderer {
   ) {
     const { cell } = board;
     const { x, y } = enemyPos(enemy, board, anim);
-    const size = cell * enemy.scale * 1.12;
+    // выход из портала: тварь вырастает на первых шагах
+    const emerge = enemy.ownerId ? 1 : Math.min(1, 0.45 + enemy.travel * 1.4);
+    const size = cell * enemy.scale * 1.12 * emerge;
     const groundY = board.oy + enemy.y * cell;
+    if (emerge < 1) {
+      ctx.globalCompositeOperation = "lighter";
+      blot(ctx, "rgba(226, 91, 58, 1)", x, y, size * 0.9, (1 - emerge) * 1.2);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
+    if (enemy.elite) {
+      // элитная: вращающийся пунктирный ореол цвета свойства
+      const color = AFFIXES[enemy.elite].color;
+      ctx.globalCompositeOperation = "lighter";
+      blot(ctx, color, x, y, size * 0.85, 0.3 + Math.sin(anim * 5 + enemy.id) * 0.08);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 0.95;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1.5, cell * 0.045);
+      ctx.setLineDash([cell * 0.14, cell * 0.1]);
+      ctx.lineDashOffset = -anim * cell * 0.5;
+      ctx.beginPath();
+      ctx.ellipse(x, groundY + size * 0.3, size * 0.42, size * 0.17, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+    if (enemy.kind === "drummer") {
+      // круги горна расходятся до края ауры
+      ctx.strokeStyle = "rgba(255, 176, 74, 0.5)";
+      ctx.lineWidth = 1.5;
+      for (let k = 0; k < 2; k++) {
+        const t = (anim * 0.8 + k * 0.5) % 1;
+        ctx.globalAlpha = (1 - t) * 0.6;
+        ctx.beginPath();
+        ctx.arc(x, groundY, HASTE_RADIUS * cell * t, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (enemy.kind === "silencer") {
+      ctx.globalCompositeOperation = "lighter";
+      blot(ctx, "rgba(196, 107, 255, 1)", x, y, size * 0.8, 0.3 + Math.sin(anim * 4 + enemy.id) * 0.1);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    }
+    if (enemy.dashT > 0 || enemy.haste) {
+      // полосы скорости позади
+      ctx.strokeStyle = enemy.dashT > 0 ? "rgba(255, 243, 214, 0.8)" : "rgba(255, 176, 74, 0.55)";
+      ctx.lineWidth = Math.max(1, cell * 0.03);
+      ctx.lineCap = "round";
+      for (let k = -1; k <= 1; k++) {
+        const px = -enemy.vy * k * size * 0.2;
+        const py = enemy.vx * k * size * 0.2;
+        const len = size * (enemy.dashT > 0 ? 0.6 : 0.35) * (1 - Math.abs(k) * 0.3);
+        ctx.beginPath();
+        ctx.moveTo(x + px - enemy.vx * size * 0.3, y + py - enemy.vy * size * 0.3);
+        ctx.lineTo(x + px - enemy.vx * (size * 0.3 + len), y + py - enemy.vy * (size * 0.3 + len));
+        ctx.stroke();
+      }
+    }
+    // скрытая Тень игроку видна, но призраком
+    const ghost = enemy.kind === "shade" && enemy.hidden;
 
     ctx.fillStyle = "rgba(0, 0, 0, 0.38)";
     ctx.beginPath();
@@ -695,8 +1138,44 @@ export function createRenderer(): Renderer {
     const flip = enemy.vx < -0.2;
     const squash = enemy.flying ? 1 : 1 + Math.sin(anim * 14 + enemy.id) * 0.04;
     const tilt = enemy.flying ? 0 : Math.sin(anim * 7 + enemy.id) * 0.05;
+    if (ghost) ctx.globalAlpha = 0.32 + Math.sin(anim * 3 + enemy.id) * 0.08;
     if (!drawSprite(ctx, sprites[enemy.kind], x, y, size, flip, squash, tilt)) {
       fallbackCreep(ctx, x, y, size * 0.32, enemy.color);
+    }
+    ctx.globalAlpha = 1;
+    if (enemy.kind === "shade" && !ghost) {
+      // раскрытая Тень: метка-глаз над ней
+      ctx.strokeStyle = "#cfd6ff";
+      ctx.lineWidth = Math.max(1.2, cell * 0.03);
+      ctx.beginPath();
+      ctx.ellipse(x, y - size * 0.62, size * 0.16, size * 0.08, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#cfd6ff";
+      ctx.beginPath();
+      ctx.arc(x, y - size * 0.62, size * 0.04, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (enemy.shellT > 0) {
+      // панцирь: стальной купол с бликом
+      const grad = ctx.createRadialGradient(x - size * 0.15, y - size * 0.2, size * 0.05, x, y, size * 0.55);
+      grad.addColorStop(0, "rgba(240, 246, 250, 0.75)");
+      grad.addColorStop(0.5, "rgba(150, 165, 175, 0.5)");
+      grad.addColorStop(1, "rgba(70, 82, 92, 0.6)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(225, 235, 240, 0.9)";
+      ctx.lineWidth = Math.max(1.5, cell * 0.04);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - size * 0.5, y);
+      ctx.lineTo(x + size * 0.5, y);
+      ctx.moveTo(x, y - size * 0.5);
+      ctx.lineTo(x, y + size * 0.5);
+      ctx.globalAlpha = 0.4;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
     }
     if (enemy.shield > 0) {
       // щит дугой спереди; ударов осталось — столько насечек
@@ -798,9 +1277,17 @@ export function createRenderer(): Renderer {
     const pct = Math.max(0, enemy.hp / enemy.maxHp);
     const bx = x - w / 2;
     const by = y - size * 0.55;
+    const was = shownHp.get(enemy) ?? 1;
+    const lag = pct > was ? pct : Math.max(pct, was - 0.012);
+    shownHp.set(enemy, lag);
     ctx.fillStyle = "rgba(0,0,0,0.7)";
     round(ctx, bx - 1, by - 1, w + 2, h + 2, h);
     ctx.fill();
+    if (lag > pct + 0.01) {
+      ctx.fillStyle = "rgba(255, 246, 234, 0.85)";
+      round(ctx, bx, by, Math.max(h, w * lag), h, h);
+      ctx.fill();
+    }
     ctx.fillStyle = pct > 0.45 ? "#7eae8a" : pct > 0.2 ? "#e2b15a" : "#e25b3a";
     round(ctx, bx, by, Math.max(h, w * pct), h, h);
     ctx.fill();
@@ -906,24 +1393,47 @@ export function createRenderer(): Renderer {
       ctx.translate(x, y);
       ctx.rotate(ang);
       if (shot.kind === "archer") {
-        const len = cell * 0.3;
-        ctx.strokeStyle = "#e7efe6";
+        // стрела: древко, оперение, наконечник с бликом
+        const len = cell * 0.34;
+        ctx.strokeStyle = "#cdb898";
         ctx.lineWidth = Math.max(1.5, cell * 0.035);
         ctx.beginPath();
         ctx.moveTo(-len, 0);
         ctx.lineTo(len * 0.4, 0);
         ctx.stroke();
+        ctx.strokeStyle = "#e7efe6";
+        ctx.lineWidth = Math.max(1, cell * 0.025);
+        ctx.beginPath();
+        ctx.moveTo(-len, 0);
+        ctx.lineTo(-len * 1.25, -cell * 0.06);
+        ctx.moveTo(-len, 0);
+        ctx.lineTo(-len * 1.25, cell * 0.06);
+        ctx.moveTo(-len * 0.8, 0);
+        ctx.lineTo(-len * 1.05, -cell * 0.06);
+        ctx.moveTo(-len * 0.8, 0);
+        ctx.lineTo(-len * 1.05, cell * 0.06);
+        ctx.stroke();
         ctx.fillStyle = "#ffffff";
         ctx.beginPath();
-        ctx.moveTo(len * 0.6, 0);
-        ctx.lineTo(len * 0.25, -cell * 0.05);
-        ctx.lineTo(len * 0.25, cell * 0.05);
+        ctx.moveTo(len * 0.7, 0);
+        ctx.lineTo(len * 0.25, -cell * 0.06);
+        ctx.lineTo(len * 0.25, cell * 0.06);
         ctx.closePath();
         ctx.fill();
-      } else if (shot.kind === "ember") {
         ctx.globalCompositeOperation = "lighter";
-        blot(ctx, "rgba(226, 91, 58, 1)", 0, 0, cell * 0.34, 0.9);
-        blot(ctx, "rgba(255, 210, 120, 1)", 0, 0, cell * 0.14, 1);
+        blot(ctx, "rgba(231, 239, 230, 1)", len * 0.5, 0, cell * 0.14, 0.6);
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1;
+      } else if (shot.kind === "ember") {
+        // огненный шар: ядро, корона и языки пламени назад
+        ctx.globalCompositeOperation = "lighter";
+        for (let k = 1; k <= 4; k++) {
+          const wob = Math.sin(world.anim * 30 + k * 1.7) * cell * 0.04;
+          blot(ctx, "rgba(255, 100, 30, 1)", -k * cell * 0.13, wob, cell * (0.3 - k * 0.045), 0.7 - k * 0.12);
+        }
+        blot(ctx, "rgba(226, 91, 58, 1)", 0, 0, cell * 0.4, 0.95);
+        blot(ctx, "rgba(255, 190, 90, 1)", 0, 0, cell * 0.22, 1);
+        blot(ctx, "rgba(255, 250, 220, 1)", 0, 0, cell * 0.1, 1);
         ctx.globalCompositeOperation = "source-over";
         ctx.globalAlpha = 1;
       } else if (shot.kind === "frost") {
@@ -987,6 +1497,13 @@ export function createRenderer(): Renderer {
       lights.push(["rgba(226, 91, 58, 1)", ox + first.x * cell, oy + first.y * cell, cell * 2.2, 0.5 + Math.sin(anim * 3) * 0.08]);
     }
     lights.push(["rgba(226, 177, 90, 1)", ox + gate.x * cell, oy + gate.y * cell, cell * 2.6, 0.55 + Math.sin(anim * 2.2) * 0.06]);
+    for (let i = 0; i < torches.length; i++) {
+      const torch = torches[i]!;
+      lights.push(["rgba(255, 150, 70, 1)", torch.x, torch.y - cell * 0.2, cell * (1.55 + Math.sin(anim * 10 + i * 2.1) * 0.07), 0.42]);
+    }
+    for (const meteor of world.meteors) {
+      lights.push(["rgba(255, 130, 60, 1)", ox + meteor.x * cell, oy + meteor.y * cell, cell * 2.2, 0.5]);
+    }
     for (const tower of world.towers) {
       const { x, y } = towerCenter(tower, board);
       const def = TOWERS[tower.kind];
@@ -1051,7 +1568,7 @@ export function createRenderer(): Renderer {
       const k = 1 - clamp01(strike.t / strike.max);
       const x = ox + strike.x * cell;
       const y = oy + strike.y * cell;
-      const r = ABILITY_RADIUS * cell;
+      const r = strike.radius * cell;
       ctx.fillStyle = `rgba(226, 91, 58, ${0.1 + 0.2 * k})`;
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -1076,7 +1593,7 @@ export function createRenderer(): Renderer {
     if (world.aiming && world.hoverFx >= 0) {
       const x = ox + world.hoverFx * cell;
       const y = oy + world.hoverFy * cell;
-      const r = ABILITY_RADIUS * cell;
+      const r = world.aimRadius * cell;
       ctx.fillStyle = "rgba(226, 91, 58, 0.1)";
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -1153,52 +1670,111 @@ export function createRenderer(): Renderer {
     ctx.fillStyle = grad;
     round(ctx, x, y, Math.max(h, w * pct), h, h);
     ctx.fill();
+    // метки рёва: на этих долях здоровья Таран глушит башни
+    ctx.fillStyle = "#0c100e";
+    for (let i = boss.roars; i < ROAR_AT.length; i++) ctx.fillRect(x + w * ROAR_AT[i]! - 1, y - 2, 2, h + 4);
   }
 
   function drawPortal(ctx: CanvasRenderingContext2D, x: number, y: number, cell: number, anim: number) {
     ctx.save();
     ctx.translate(x, y);
+    // тёмная воронка, вокруг — закрученные рукава и искры, которые в неё затягивает
+    ctx.fillStyle = "rgba(6, 3, 3, 0.9)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, cell * 0.42, cell * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.globalCompositeOperation = "lighter";
-    blot(ctx, "rgba(226, 91, 58, 1)", 0, 0, cell * 0.8, 0.45);
-    ctx.globalAlpha = 1;
-    for (let k = 0; k < 3; k++) {
-      ctx.strokeStyle = k === 1 ? "rgba(226, 177, 90, 0.75)" : "rgba(226, 91, 58, 0.85)";
-      ctx.lineWidth = 2;
-      const r = cell * (0.18 + k * 0.1);
-      const a = anim * (k % 2 ? -1.6 : 1.2) + k;
+    blot(ctx, "rgba(226, 91, 58, 1)", 0, 0, cell * (1.0 + Math.sin(anim * 2.4) * 0.06), 0.55);
+    blot(ctx, "rgba(150, 60, 200, 1)", 0, 0, cell * 0.6, 0.35);
+    ctx.lineCap = "round";
+    for (let k = 0; k < 5; k++) {
+      const r = cell * (0.12 + k * 0.075);
+      const a = anim * (k % 2 ? -1.9 : 1.4) + k * 1.3;
+      ctx.globalAlpha = 0.9 - k * 0.12;
+      ctx.strokeStyle = k % 3 === 0 ? "#ffd27a" : k % 3 === 1 ? "#e25b3a" : "#c46bff";
+      ctx.lineWidth = Math.max(1.5, cell * (0.05 - k * 0.006));
       ctx.beginPath();
-      ctx.arc(0, 0, r, a, a + Math.PI * 1.3);
+      ctx.arc(0, 0, r, a, a + Math.PI * (1.1 - k * 0.1));
       ctx.stroke();
     }
-    // искры, которые затягивает в портал
-    for (let k = 0; k < 6; k++) {
-      const t = (anim * 0.5 + k / 6) % 1;
-      const a = k * 1.7 + anim * 0.8;
-      const r = cell * 0.55 * (1 - t);
+    for (let k = 0; k < 10; k++) {
+      const t = (anim * 0.45 + k / 10) % 1;
+      const a = k * 1.7 + anim * 1.1 + t * 3;
+      const r = cell * 0.75 * (1 - t);
       ctx.globalAlpha = t;
-      ctx.fillStyle = "#ffb35a";
+      ctx.fillStyle = k % 2 ? "#ffb35a" : "#ff7a4a";
       ctx.fillRect(Math.cos(a) * r - 1, Math.sin(a) * r - 1, 2, 2);
     }
     ctx.restore();
   }
 
-  function drawGate(ctx: CanvasRenderingContext2D, x: number, y: number, cell: number, anim: number) {
+  function drawGate(ctx: CanvasRenderingContext2D, x: number, y: number, cell: number, anim: number, health = 1) {
     ctx.save();
     ctx.translate(x, y);
+    // чем меньше жизней, тем слабее и тревожнее свет врат
+    const warm = 0.35 + health * 0.65;
+    const alarm = health < 0.35 ? 0.5 + Math.sin(anim * 9) * 0.5 : 0;
     ctx.globalCompositeOperation = "lighter";
-    blot(ctx, "rgba(226, 177, 90, 1)", 0, 0, cell * 0.9, 0.3);
+    blot(ctx, "rgba(226, 177, 90, 1)", 0, 0, cell * 1.15, 0.38 * warm);
+    if (alarm > 0) blot(ctx, "rgba(226, 60, 40, 1)", 0, 0, cell * 1.3, 0.4 * alarm);
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1;
-    ctx.fillStyle = "#2a241c";
-    ctx.fillRect(-cell * 0.3, -cell * 0.44, cell * 0.13, cell * 0.88);
-    ctx.fillRect(cell * 0.17, -cell * 0.44, cell * 0.13, cell * 0.88);
-    ctx.strokeStyle = "#e2b15a";
-    ctx.lineWidth = 2;
+    // каменная арка
+    const stone = ctx.createLinearGradient(0, -cell * 0.5, 0, cell * 0.45);
+    stone.addColorStop(0, "#5b5146");
+    stone.addColorStop(1, "#2a241c");
+    ctx.fillStyle = stone;
+    ctx.strokeStyle = "#14100c";
+    ctx.lineWidth = Math.max(1, cell * 0.03);
     ctx.beginPath();
-    ctx.arc(0, cell * 0.02, cell * 0.3, Math.PI, 0);
+    ctx.moveTo(-cell * 0.42, cell * 0.45);
+    ctx.lineTo(-cell * 0.42, -cell * 0.08);
+    ctx.arc(0, -cell * 0.08, cell * 0.42, Math.PI, 0);
+    ctx.lineTo(cell * 0.42, cell * 0.45);
+    ctx.lineTo(cell * 0.25, cell * 0.45);
+    ctx.lineTo(cell * 0.25, -cell * 0.08);
+    ctx.arc(0, -cell * 0.08, cell * 0.25, 0, Math.PI, true);
+    ctx.lineTo(-cell * 0.25, cell * 0.45);
+    ctx.closePath();
+    ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = `rgba(226, 91, 58, ${0.45 + Math.sin(anim * 3) * 0.15})`;
-    ctx.fillRect(-cell * 0.08, -cell * 0.08, cell * 0.16, cell * 0.28);
+    // створ: решётка и свет изнутри
+    ctx.fillStyle = `rgba(226, ${Math.round(120 + 60 * health)}, 70, ${0.35 + 0.3 * warm + Math.sin(anim * 3) * 0.08})`;
+    ctx.beginPath();
+    ctx.moveTo(-cell * 0.25, cell * 0.45);
+    ctx.lineTo(-cell * 0.25, -cell * 0.08);
+    ctx.arc(0, -cell * 0.08, cell * 0.25, Math.PI, 0);
+    ctx.lineTo(cell * 0.25, cell * 0.45);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(20, 14, 9, 0.85)";
+    ctx.lineWidth = Math.max(1, cell * 0.035);
+    for (let k = -1; k <= 1; k++) {
+      ctx.beginPath();
+      ctx.moveTo(k * cell * 0.12, -cell * 0.3);
+      ctx.lineTo(k * cell * 0.12, cell * 0.45);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(-cell * 0.25, cell * 0.08);
+    ctx.lineTo(cell * 0.25, cell * 0.08);
+    ctx.stroke();
+    // золотой замковый камень и жаровни по бокам
+    ctx.fillStyle = "#e2b15a";
+    ctx.beginPath();
+    ctx.moveTo(0, -cell * 0.56);
+    ctx.lineTo(cell * 0.07, -cell * 0.46);
+    ctx.lineTo(0, -cell * 0.36);
+    ctx.lineTo(-cell * 0.07, -cell * 0.46);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalCompositeOperation = "lighter";
+    for (const side of [-1, 1]) {
+      const bx = side * cell * 0.56;
+      const flick = Math.sin(anim * 12 + side * 2) * 0.5 + Math.sin(anim * 7 + side) * 0.5;
+      blot(ctx, "rgba(255, 120, 40, 1)", bx, cell * 0.1, cell * (0.26 + flick * 0.03) * warm, 0.8 * warm);
+      blot(ctx, "rgba(255, 220, 140, 1)", bx, cell * 0.08, cell * 0.1 * warm, 0.95);
+    }
     ctx.restore();
   }
 
