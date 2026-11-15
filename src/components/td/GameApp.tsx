@@ -12,6 +12,7 @@ import {
   Coins,
   Crosshair,
   Flag,
+  ChevronsUp,
   Flame,
   Gift,
   Heart,
@@ -162,6 +163,25 @@ export function GameApp() {
     };
   }, [sim]);
 
+  /** Последняя клетка протяжки: между двумя событиями палец пролетает несколько клеток, их тоже надо занять. */
+  const lastCell = useRef<{ col: number; row: number } | null>(null);
+  const dragLine = (col: number, row: number) => {
+    const from = lastCell.current;
+    lastCell.current = { col, row };
+    if (!from) {
+      sim.pointer(col, row, "drag");
+      return;
+    }
+    const steps = Math.max(Math.abs(col - from.col), Math.abs(row - from.row), 1);
+    for (let i = 1; i <= steps; i++) {
+      sim.pointer(
+        Math.round(from.col + ((col - from.col) * i) / steps),
+        Math.round(from.row + ((row - from.row) * i) / steps),
+        "drag",
+      );
+    }
+  };
+
   const cellFromEvent = (event: PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const layout = boardLayout(rect.width, rect.height);
@@ -263,11 +283,20 @@ export function GameApp() {
             onPointerMove={(event) => {
               const cell = cellFromEvent(event);
               sim.pointer(cell.col, cell.row, "move", cell.fx, cell.fy);
+              if (event.buttons & 1 && lastCell.current) dragLine(cell.col, cell.row);
+            }}
+            onPointerUp={() => {
+              lastCell.current = null;
+            }}
+            onPointerCancel={() => {
+              lastCell.current = null;
             }}
             onPointerDown={(event) => {
               event.currentTarget.setPointerCapture(event.pointerId);
               const cell = cellFromEvent(event);
               sim.pointer(cell.col, cell.row, "down", cell.fx, cell.fy);
+              // дальше палец можно вести не отрывая: пока выбрана башня, она встаёт в каждую клетку
+              lastCell.current = { col: cell.col, row: cell.row };
             }}
           />
           {hud.banner && (
@@ -295,14 +324,14 @@ export function GameApp() {
           {hud.perk && <PerkCard perk={hud.perk} sim={sim} />}
           {hud.event && <EventCard event={hud.event} sim={sim} />}
           {hud.phase === "prep" && (
-            <div className="absolute inset-x-0 bottom-3 flex flex-col items-center gap-2 px-3">
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 flex flex-col items-center gap-2 px-3">
               <TutorialHint hud={hud} />
               <PrepTimer left={hud.prepLeft} />
               <button
                 type="button"
                 data-testid="call-wave"
                 onClick={sim.callWave}
-                className="inline-flex min-h-11 animate-call-glow items-center justify-center rounded-full bg-gold px-5 py-2.5 text-sm font-semibold text-bg"
+                className="pointer-events-auto inline-flex min-h-11 animate-call-glow items-center justify-center rounded-full bg-gold px-5 py-2.5 text-sm font-semibold text-bg"
               >
                 {hud.earlyBonus > 0 ? `Вызвать волну · +${hud.earlyBonus}` : "Вызвать волну"}
               </button>
@@ -469,6 +498,20 @@ function AbilityBar({ hud, sim }: { hud: Hud; sim: Sim }) {
         active={hud.rallyOn}
         onClick={sim.rally}
       />
+      <button
+        type="button"
+        data-testid="max-all"
+        aria-label={`Всё на максимум: ${hud.maxAll.steps} улучшений за ${hud.maxAll.cost} золота`}
+        title={`Прокачать все башни на поле на максимум (${hud.maxAll.steps} улучшений, ${hud.maxAll.cost} золота)`}
+        disabled={hud.maxAll.steps === 0}
+        onClick={sim.upgradeAll}
+        className="mt-1 flex w-12 shrink-0 flex-col items-center gap-0.5 disabled:opacity-40 sm:w-14"
+      >
+        <span className="inline-flex size-9 items-center justify-center rounded-full border border-gold/60 bg-bg text-gold">
+          <ChevronsUp className="size-5" aria-hidden="true" />
+        </span>
+        <span className="text-center text-[10px] leading-tight text-fg">Всё на макс.</span>
+      </button>
       <span className="mx-0.5 mt-1 h-10 w-px shrink-0 bg-line sm:mx-1" aria-hidden="true" />
       <WrathButton rage={hud.rage} need={hud.rageNeed} ready={wrathReady} on={hud.wrathOn} onClick={sim.wrath} />
     </div>
@@ -663,7 +706,7 @@ function TutorialHint({ hud }: { hud: Hud }) {
         type="button"
         onClick={done}
         aria-label="Скрыть подсказки"
-        className="inline-flex size-7 items-center justify-center rounded-full text-muted"
+        className="pointer-events-auto inline-flex size-7 items-center justify-center rounded-full text-muted"
       >
         ×
       </button>

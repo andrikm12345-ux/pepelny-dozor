@@ -566,6 +566,8 @@ export interface Hud {
   perks: Array<{ id: PerkId; name: string; blurb: string }>;
   /** Цена каждой башни с учётом даров. */
   towerCost: Record<TowerKind, number>;
+  /** «Всё на максимум»: сколько улучшений ещё можно купить и сколько они стоят вместе. */
+  maxAll: { steps: number; cost: number };
   /** Кто прорвался к вратам за забег: по видам, от частых к редким. */
   leakedKinds: Array<{ kind: EnemyKind; name: string; count: number }>;
   event: EventView | null;
@@ -613,7 +615,8 @@ export interface Sim {
   specialize(spec: SpecId): void;
   sell(): void;
   callWave(): void;
-  pointer(col: number, row: number, type: "move" | "down" | "leave", fx?: number, fy?: number): void;
+  pointer(col: number, row: number, type: "move" | "down" | "drag" | "leave", fx?: number, fy?: number): void;
+  upgradeAll(): void;
   frame(realDt: number): void;
   simulate(seconds: number): void;
 }
@@ -764,6 +767,27 @@ export function createSim(): Sim {
     return st;
   }
 
+  /** Все улучшения урона и скорости, которых башням ещё не хватает, от дешёвых к дорогим. */
+  function upgradeSteps() {
+    const steps: Array<{ tower: Tower; track: "dmg" | "rate"; cost: number }> = [];
+    for (const tower of world.towers) {
+      const def = TOWERS[tower.kind];
+      if (def.aura > 0) continue;
+      for (const track of ["dmg", "rate"] as const) {
+        const start = track === "dmg" ? tower.dmgRank : tower.rateRank;
+        for (let rank = start; rank < MAX_RANK; rank++) {
+          steps.push({ tower, track, cost: price(upgradeCost(def.cost, rank)) });
+        }
+      }
+    }
+    return steps.sort((a, b) => a.cost - b.cost);
+  }
+
+  function maxAllPlan() {
+    const steps = upgradeSteps();
+    return { steps: steps.length, cost: steps.reduce((sum, step) => sum + step.cost, 0) };
+  }
+
   function perkView(): PerkView | null {
     if (!perkOptions) return null;
     return { options: perkOptions.map((id) => ({ id, name: PERKS[id].name, blurb: PERKS[id].blurb })) };
@@ -882,6 +906,7 @@ export function createSim(): Sim {
       wrathOn: world.wrathT > 0,
       perk: perkView(),
       perks: [...perks].map((id) => ({ id, name: PERKS[id].name, blurb: PERKS[id].blurb })),
+      maxAll: maxAllPlan(),
       towerCost: Object.fromEntries(TOWER_ORDER.map((kind) => [kind, price(TOWERS[kind].cost)])) as Record<TowerKind, number>,
       leakedKinds: [...leakedBy.entries()]
         .sort((a, b) => b[1] - a[1])
@@ -2425,16 +2450,19 @@ export function createSim(): Sim {
     if (world.flashes.some((item) => item.life <= 0)) world.flashes = world.flashes.filter((item) => item.life > 0);
   }
 
-  function place(col: number, row: number) {
+  /** quiet — протяжка пальцем: занятые клетки и тропу молча пропускаем, а не ругаемся на каждой. */
+  function place(col: number, row: number, quiet = false) {
     if (phase === "menu" || phase === "victory" || phase === "defeat") return;
     if (!build) return;
     if (!isInside(col, row) || isRoad(world.map, col, row)) {
+      if (quiet) return;
       sfx("deny");
       say("Сюда нельзя — это тропа");
       return;
     }
     const key = `${col},${row}`;
     if (occ.has(key)) {
+      if (quiet) return;
       sfx("deny");
       say("Клетка занята");
       return;
@@ -2442,6 +2470,13 @@ export function createSim(): Sim {
     const def = TOWERS[build];
     const cost = price(def.cost);
     if (!canPay(cost)) {
+      if (quiet) {
+        if (banner !== "Не хватает золота" || bannerT <= 0) {
+          sfx("deny");
+          say("Не хватает золота");
+        }
+        return;
+      }
       sfx("deny");
       say("Не хватает золота");
       return;
@@ -2904,6 +2939,47 @@ export function createSim(): Sim {
       saveRun();
       flush();
     },
+    upgradeAll() {
+      audio.unlock();
+      if (phase === "menu" || phase === "victory" || phase === "defeat") return;
+      const steps = upgradeSteps();
+      if (!steps.length) {
+        sfx("deny");
+        say(world.towers.length ? "Всё уже на максимуме" : "Прокачивать нечего: на поле нет башен");
+        return;
+      }
+      let done = 0;
+      for (const step of steps) {
+        if (!canPay(step.cost)) continue;
+        // дешёвые шаги идут первыми, но ранги одной башни должны покупаться по порядку: цену считаем заново
+        const rank = step.track === "dmg" ? step.tower.dmgRank : step.tower.rateRank;
+        if (rank >= MAX_RANK) continue;
+        const cost = price(upgradeCost(TOWERS[step.tower.kind].cost, rank));
+        if (!canPay(cost)) continue;
+        pay(cost);
+        step.tower.spent += cost;
+        if (step.track === "dmg") step.tower.dmgRank++;
+        else step.tower.rateRank++;
+        done++;
+      }
+      refreshTowers();
+      for (const tower of world.towers) {
+        if (TOWERS[tower.kind].aura > 0) continue;
+        addRing(tower.col + 0.5, tower.row + 0.5, 0.2, 0.9, "#e2b15a", 0.5);
+        burst(tower.col + 0.5, tower.row + 0.5, "#e2b15a", 6, 1);
+      }
+      const left = upgradeSteps().length;
+      if (done) sfx("upgrade");
+      else sfx("deny");
+      banner = !done
+        ? "Не хватает золота даже на одно улучшение"
+        : left
+          ? `Прокачано улучшений: ${done}. Не хватило золота ещё на ${left}`
+          : `Всё на максимуме (${done} улучшений)`;
+      bannerT = 2.6;
+      saveRun();
+      flush();
+    },
     callWave() {
       audio.unlock();
       if (perkOptions) {
@@ -2936,6 +3012,12 @@ export function createSim(): Sim {
       world.hoverRow = row;
       world.hoverFx = fx;
       world.hoverFy = fy;
+      if (type === "drag") {
+        // зажатый палец ведёт по полю: башня выбранного вида встаёт в каждую свободную клетку на пути
+        if (phase === "menu" || phase === "victory" || phase === "defeat" || aiming || !build) return;
+        place(col, row, true);
+        return;
+      }
       if (type !== "down") return;
       audio.unlock();
       if (phase === "menu" || phase === "victory" || phase === "defeat") return;

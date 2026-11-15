@@ -390,5 +390,51 @@ const TY = tr + 0.5;
   ok("старый сейв: бой идёт", s3.getSnapshot().phase === "combat");
 }
 
+// 15. Протяжка: выбранная башня встаёт в каждую свободную клетку, тропу и занятые клетки молча пропускает
+{
+  const s = fresh();
+  s.selectBuild("archer");
+  const cells: Array<[number, number]> = [];
+  for (let c = 0; c < 8; c++) cells.push([c, 0]);
+  for (const [c, r] of cells) s.pointer(c, r, "drag");
+  const placed = s.world.towers.length;
+  const onRoad = cells.filter(([c, r]) => isRoad(map, c, r)).length;
+  ok("протяжка: башни встали во все клетки не на тропе", placed === cells.length - onRoad && placed > 0, `${placed} башен, на тропе ${onRoad} клеток`);
+  for (const [c, r] of cells) s.pointer(c, r, "drag");
+  ok("протяжка: повторный проход ничего не ломает", s.world.towers.length === placed);
+  ok("протяжка: выбранная башня остаётся в руке", s.getSnapshot().build === "archer");
+  const poor = createSim();
+  poor.start();
+  poor.selectBuild("archer");
+  for (let c = 0; c < 18; c++) poor.pointer(c, 10, "drag");
+  const afford = Math.floor(poor.getSnapshot().goldTotal / poor.getSnapshot().towerCost.archer);
+  ok("протяжка: останавливается, когда кончилось золото", poor.world.towers.length <= afford && poor.getSnapshot().gold >= 0, `${poor.world.towers.length} из ${afford} возможных`);
+  const idle = fresh();
+  idle.pointer(2, 0, "drag");
+  ok("протяжка: без выбранной башни ничего не ставит", idle.world.towers.length === 0);
+}
+// 16. «Всё на максимум»: все ранги, золото списано, повторно нечего прокачивать
+{
+  const s = fresh();
+  put(s, "archer", 0, 0);
+  put(s, "ballista", 1, 0);
+  put(s, "banner", 2, 0);
+  const before = s.getSnapshot().maxAll;
+  ok("максимум: кнопка знает, сколько улучшений осталось", before.steps === 12, `${before.steps} шагов за ${before.cost}`);
+  s.upgradeAll();
+  const rows = s.world.towers.filter((t) => TOWERS[t.kind].aura === 0);
+  ok("максимум: у стреляющих башен все ранги 3/3", rows.every((t) => t.dmgRank === 3 && t.rateRank === 3));
+  ok("максимум: после этого нечего прокачивать", s.getSnapshot().maxAll.steps === 0);
+  const poor = createSim();
+  poor.start();
+  put(poor, "archer", 0, 0);
+  poor.dismiss();
+  const g0 = poor.getSnapshot().gold;
+  poor.upgradeAll();
+  const hud = poor.getSnapshot();
+  const t = poor.world.towers[0]!;
+  ok("максимум: без чита покупает, пока хватает золота", g0 - hud.gold > 0 && hud.gold >= 0 && t.dmgRank + t.rateRank > 0, `золото ${g0} → ${hud.gold}, ранги ${t.dmgRank}+${t.rateRank}`);
+}
+
 console.log(bad ? `\nОШИБОК: ${bad}` : "\nвсе проверки обновления прошли");
 if (bad) process.exit(1);
