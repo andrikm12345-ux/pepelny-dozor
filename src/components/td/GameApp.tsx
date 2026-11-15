@@ -7,10 +7,13 @@ import {
   type ReactNode,
 } from "react";
 import {
+  BellRing,
+  CloudLightning,
   Coins,
   Crosshair,
   Flag,
   Flame,
+  Gift,
   Heart,
   Infinity as InfinityIcon,
   Mountain,
@@ -67,6 +70,8 @@ export function GameApp() {
 
   useEffect(() => {
     sim.loadProgress();
+    // только в режиме разработки: доступ к симуляции для проверки в браузере
+    if (import.meta.env.DEV) (window as unknown as { __sim?: Sim }).__sim = sim;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const sprites: Record<string, HTMLImageElement> = {};
@@ -84,6 +89,9 @@ export function GameApp() {
       "healer",
       "shield",
       "summoner",
+      "silencer",
+      "drummer",
+      "shade",
       "boss",
     ]) {
       const img = new Image();
@@ -136,7 +144,10 @@ export function GameApp() {
       else if (event.code === "Digit5") sim.selectBuild("tesla");
       else if (event.code === "Digit6") sim.selectBuild("banner");
       else if (event.code === "KeyQ") sim.toggleAim();
+      else if (event.code === "KeyW") sim.storm();
       else if (event.code === "KeyE") sim.freeze();
+      else if (event.code === "KeyR") sim.rally();
+      else if (event.code === "KeyF") sim.wrath();
       else if (event.code === "KeyZ" || event.code === "KeyX") {
         const pick = sim.getSnapshot().selection?.specs[event.code === "KeyZ" ? 0 : 1];
         if (pick) sim.specialize(pick.id);
@@ -221,29 +232,6 @@ export function GameApp() {
             <span className="text-xs font-semibold">{hud.speed === 1 ? "1×" : "2×"}</span>
           </IconButton>
           <IconButton
-            label={hud.aiming ? "Отменить обвал" : "Обвал Димона (Q)"}
-            onClick={sim.toggleAim}
-            disabled={ended}
-            active={hud.aiming}
-          >
-            {hud.abilityLeft > 0 ? (
-              <span className="text-xs font-semibold tabular-nums text-muted">
-                {hud.abilityLeft}
-              </span>
-            ) : (
-              <Mountain
-                className={cx("size-4", hud.phase === "combat" && !hud.aiming && "text-gold")}
-              />
-            )}
-          </IconButton>
-          <IconButton label="Заморозка Димона (E)" onClick={sim.freeze} disabled={ended}>
-            {hud.freezeLeft > 0 ? (
-              <span className="text-xs font-semibold tabular-nums text-muted">{hud.freezeLeft}</span>
-            ) : (
-              <Wind className={cx("size-4", hud.phase === "combat" && "text-gold")} />
-            )}
-          </IconButton>
-          <IconButton
             label={hud.cheat ? "Выключить чит" : "Чит: бесконечное золото"}
             onClick={sim.toggleCheat}
             active={hud.cheat}
@@ -260,6 +248,7 @@ export function GameApp() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div className="flex min-h-0 flex-1 basis-0 flex-col">
         <div className="relative min-h-0 flex-1 basis-0">
           <canvas
             ref={canvasRef}
@@ -303,6 +292,7 @@ export function GameApp() {
               <p className="font-display text-4xl text-gold">Пауза</p>
             </div>
           )}
+          {hud.perk && <PerkCard perk={hud.perk} sim={sim} />}
           {hud.event && <EventCard event={hud.event} sim={sim} />}
           {hud.phase === "prep" && (
             <div className="absolute inset-x-0 bottom-3 flex flex-col items-center gap-2 px-3">
@@ -327,9 +317,12 @@ export function GameApp() {
             </div>
           )}
         </div>
+        {!ended && <AbilityBar hud={hud} sim={sim} />}
+        </div>
 
         <aside className="flex max-h-[46%] shrink-0 flex-col gap-3 overflow-y-auto border-t border-line bg-surface p-3 lg:max-h-none lg:h-full lg:w-80 lg:border-t-0 lg:border-l lg:p-4">
           <DimonCard hud={hud} compact={Boolean(hud.selection)} />
+          {hud.perks.length > 0 && <PerkList perks={hud.perks} />}
           {hud.selection ? (
             <Inspector hud={hud} sim={sim} />
           ) : (
@@ -361,7 +354,8 @@ export function GameApp() {
                 const def = TOWERS[kind];
                 const Icon = ICONS[kind];
                 const active = hud.build === kind;
-                const poor = !hud.cheat && hud.gold < def.cost;
+                const cost = hud.towerCost[kind];
+                const poor = !hud.cheat && hud.gold < cost;
                 return (
                   <button
                     key={kind}
@@ -385,7 +379,7 @@ export function GameApp() {
                           <Icon className="size-4 text-gold" aria-hidden="true" />
                           {def.name}
                         </span>
-                        <span className="tabular-nums text-gold">{def.cost}</span>
+                        <span className="tabular-nums text-gold">{cost}</span>
                       </span>
                       <span className="mt-0.5 hidden text-xs leading-snug text-muted lg:block">
                         {def.blurb}
@@ -413,6 +407,226 @@ export function GameApp() {
           onContinue={sim.continueRun}
         />
       )}
+    </div>
+  );
+}
+
+/** Панель способностей Димона: кольцо показывает перезарядку, справа — шкала Гнева. */
+function AbilityBar({ hud, sim }: { hud: Hud; sim: Sim }) {
+  const combat = hud.phase === "combat";
+  const wrathReady = hud.rage >= hud.rageNeed;
+  return (
+    <div
+      className={cx(
+        "flex shrink-0 items-start justify-center gap-2 border-t border-line bg-surface/80 px-2 pt-2 pb-1.5 sm:gap-3",
+        !combat && "opacity-60",
+      )}
+      data-testid="ability-bar"
+    >
+      <AbilityButton
+        id="rock"
+        name="Обвал"
+        hint="Удар по области, потом завал: твари в нём идут вдвое медленнее"
+        hotkey="Q"
+        icon={Mountain}
+        tone="var(--color-gold)"
+        left={hud.abilityLeft}
+        total={hud.cooldowns.rock}
+        active={hud.aiming}
+        onClick={sim.toggleAim}
+      />
+      <AbilityButton
+        id="storm"
+        name="Гроза"
+        hint="Молнии по самым здоровым тварям: сбивают щиты и глушат"
+        hotkey="W"
+        icon={CloudLightning}
+        tone="#8fd6ff"
+        left={hud.stormLeft}
+        total={hud.cooldowns.storm}
+        onClick={sim.storm}
+      />
+      <AbilityButton
+        id="freeze"
+        name="Заморозка"
+        hint="Все твари встают; убитые во льду разлетаются осколками"
+        hotkey="E"
+        icon={Wind}
+        tone="var(--color-ice)"
+        left={hud.freezeLeft}
+        total={hud.cooldowns.freeze}
+        onClick={sim.freeze}
+      />
+      <AbilityButton
+        id="rally"
+        name="Набат"
+        hint="6 секунд башни бьют чаще и сильнее, глушение снято"
+        hotkey="R"
+        icon={BellRing}
+        tone="#ffd88a"
+        left={hud.rallyLeft}
+        total={hud.cooldowns.rally}
+        active={hud.rallyOn}
+        onClick={sim.rally}
+      />
+      <span className="mx-0.5 mt-1 h-10 w-px shrink-0 bg-line sm:mx-1" aria-hidden="true" />
+      <WrathButton rage={hud.rage} need={hud.rageNeed} ready={wrathReady} on={hud.wrathOn} onClick={sim.wrath} />
+    </div>
+  );
+}
+
+function AbilityButton({
+  id,
+  name,
+  hint,
+  hotkey,
+  icon: Icon,
+  tone,
+  left,
+  total,
+  active,
+  onClick,
+}: {
+  id: string;
+  name: string;
+  hint: string;
+  hotkey: string;
+  icon: LucideIcon;
+  tone: string;
+  left: number;
+  total: number;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  const ready = left <= 0;
+  const pct = total > 0 ? Math.max(0, Math.min(1, 1 - left / total)) : 1;
+  const ring = 2 * Math.PI * 21;
+  return (
+    <button
+      type="button"
+      data-testid={`ability-${id}`}
+      aria-label={ready ? `${name} (${hotkey}). ${hint}` : `${name}: готово через ${left} с`}
+      aria-pressed={active}
+      title={`${name} (${hotkey}) — ${hint}`}
+      onClick={onClick}
+      className="flex w-13 shrink-0 flex-col items-center gap-0.5 sm:w-16"
+    >
+      <span
+        className={cx(
+          "relative inline-flex size-12 items-center justify-center rounded-full bg-bg",
+          active && "ring-2 ring-gold",
+        )}
+        style={ready ? { boxShadow: `0 0 14px -2px ${tone}` } : undefined}
+      >
+        <svg viewBox="0 0 48 48" className="absolute inset-0 -rotate-90" aria-hidden="true">
+          <circle cx="24" cy="24" r="21" fill="none" stroke="var(--color-line)" strokeWidth="3" />
+          <circle
+            cx="24"
+            cy="24"
+            r="21"
+            fill="none"
+            stroke={tone}
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={ring}
+            strokeDashoffset={ring * (1 - pct)}
+            className="transition-[stroke-dashoffset] duration-1000 ease-linear"
+          />
+        </svg>
+        {ready ? (
+          <Icon className="relative size-5" style={{ color: tone }} aria-hidden="true" />
+        ) : (
+          <span className="relative text-sm font-semibold tabular-nums text-muted">{left}</span>
+        )}
+      </span>
+      <span className="text-[11px] leading-tight text-fg">
+        {name}
+        <span className="ml-1 hidden text-muted sm:inline">{hotkey}</span>
+      </span>
+    </button>
+  );
+}
+
+/** Гнев Димона: кольцо копится за убийства; полное — огненный дождь. */
+function WrathButton({
+  rage,
+  need,
+  ready,
+  on,
+  onClick,
+}: {
+  rage: number;
+  need: number;
+  ready: boolean;
+  on: boolean;
+  onClick: () => void;
+}) {
+  const pct = Math.max(0, Math.min(1, rage / need));
+  const ring = 2 * Math.PI * 24;
+  return (
+    <button
+      type="button"
+      data-testid="ability-wrath"
+      aria-label={
+        ready ? "Гнев Димона (F): огненный дождь по тварям" : `Гнев Димона: накоплено ${rage} из ${need}`
+      }
+      title="Гнев Димона (F) — копится за убийства; огненный дождь по тварям на всей тропе"
+      onClick={onClick}
+      className="flex w-16 shrink-0 flex-col items-center gap-0.5 sm:w-20"
+    >
+      <span
+        className={cx(
+          "relative inline-flex size-14 items-center justify-center rounded-full bg-bg",
+          ready && "animate-wrath-glow",
+        )}
+      >
+        <svg viewBox="0 0 56 56" className="absolute inset-0 -rotate-90" aria-hidden="true">
+          <circle cx="28" cy="28" r="24" fill="none" stroke="var(--color-line)" strokeWidth="4" />
+          <circle
+            cx="28"
+            cy="28"
+            r="24"
+            fill="none"
+            stroke="var(--color-ember)"
+            strokeWidth="4"
+            strokeLinecap="round"
+            strokeDasharray={ring}
+            strokeDashoffset={ring * (1 - (on ? 1 : pct))}
+            className="transition-[stroke-dashoffset] duration-500 ease-out"
+          />
+        </svg>
+        <Flame
+          className={cx("relative size-6", ready || on ? "text-ember" : "text-muted")}
+          aria-hidden="true"
+        />
+      </span>
+      <span className={cx("text-[11px] leading-tight", ready ? "font-semibold text-ember" : "text-fg")}>
+        {ready ? "Гнев готов" : on ? "Гнев!" : `Гнев ${Math.round(pct * 100)}%`}
+        <span className="ml-1 hidden text-muted sm:inline">F</span>
+      </span>
+    </button>
+  );
+}
+
+/** Взятые дары: короткие метки, подсказка — что дар делает. */
+function PerkList({ perks }: { perks: Hud["perks"] }) {
+  return (
+    <div className="rounded-2xl border border-line bg-bg px-3 py-2">
+      <p className="flex items-center gap-1.5 text-xs tracking-[0.16em] text-muted uppercase">
+        <Gift className="size-3.5 text-gold" aria-hidden="true" />
+        Дары Димона
+      </p>
+      <ul className="mt-1.5 flex flex-wrap gap-1">
+        {perks.map((perk) => (
+          <li
+            key={perk.id}
+            title={perk.blurb}
+            className="rounded-full border border-gold/40 px-2 py-0.5 text-[11px] leading-4 text-gold"
+          >
+            {perk.name}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -746,6 +960,33 @@ function EventCard({ event, sim }: { event: NonNullable<Hud["event"]>; sim: Sim 
   );
 }
 
+/** Дар Димона после каждой третьей волны: один из трёх, таймер ждёт. */
+function PerkCard({ perk, sim }: { perk: NonNullable<Hud["perk"]>; sim: Sim }) {
+  return (
+    <div className="absolute inset-x-3 top-14 z-10 mx-auto max-w-xl rounded-2xl border border-gold/60 bg-bg/95 p-3 shadow-xl backdrop-blur-sm sm:top-20">
+      <p className="flex items-center gap-1.5 text-xs tracking-[0.2em] text-ember uppercase">
+        <Gift className="size-3.5" aria-hidden="true" />
+        Дар Димона
+      </p>
+      <h2 className="font-display text-2xl leading-tight text-gold">Выбери одно — на весь забег</h2>
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {perk.options.map((option, index) => (
+          <button
+            key={option.id}
+            type="button"
+            data-testid={`perk-${index}`}
+            onClick={() => sim.choosePerk(index)}
+            className="flex min-h-11 flex-col items-start gap-0.5 rounded-xl border border-gold/40 bg-surface px-3 py-2 text-left"
+          >
+            <span className="font-display text-lg leading-tight text-gold">{option.name}</span>
+            <span className="text-xs leading-snug text-muted">{option.blurb}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Мастерство: после трёх улучшений башня выбирает один из двух путей навсегда. */
 function Mastery({
   selection,
@@ -933,6 +1174,16 @@ function MapCard({
   );
 }
 
+/** Кто чаще всех прорывался: подсказка, чем закрывать дыру. */
+function leakLine(hud: Hud) {
+  if (!hud.leakedKinds.length) return "";
+  const top = hud.leakedKinds
+    .slice(0, 3)
+    .map((item) => `${item.name} ×${item.count}`)
+    .join(", ");
+  return ` Чаще всех прорывались: ${top}.`;
+}
+
 function EndScreen({
   hud,
   onStart,
@@ -967,15 +1218,17 @@ function EndScreen({
             : defeat && hud.endless
               ? `Бесконечная ночь взяла своё на волне ${hud.wave}. Димон продержался ${hud.cleared} волн. Убито ${hud.killed}.`
               : defeat
-                ? `Волна ${hud.wave} дошла до врат. Димон это запомнил. Убито ${hud.killed}, пропущено ${hud.leaked}.`
+                ? `Волна ${hud.wave} дошла до врат. Димон это запомнил. Убито ${hud.killed}, пропущено ${hud.leaked}.${leakLine(hud)}`
                 : "Димон стережёт пепельную тропу. Его золото капает с убитых. Башни ставь на камень, не на дорогу, и улучшай урон со скорострельностью."}
         </p>
         {!victory && !defeat && (
           <ul className="mx-auto mt-4 max-w-sm space-y-1 text-left text-sm text-fg">
             <li>Жар бьёт по площади, но не достаёт летунов.</li>
             <li>Латники держат броню — её пробивает баллиста.</li>
-            <li>Знахари лечат тварей вокруг — бей их первыми.</li>
-            <li>Обвал Димона (Q) бьёт по области раз в 24 секунды.</li>
+            <li>Знахари лечат, Глушители выключают башни — бей их первыми.</li>
+            <li>Тень видна башням только рядом с Фонарём или после попадания.</li>
+            <li>Под полем — способности Димона: Обвал, Гроза, Заморозка, Набат.</li>
+            <li>Гнев копится за убийства: полный — огненный дождь.</li>
           </ul>
         )}
         <div className="mt-5">
@@ -1062,7 +1315,7 @@ function EndScreen({
           {hud.wins > 0 ? ` · побед ${hud.wins}` : ""}
         </p>
         <p className="mt-1 hidden text-xs text-muted sm:block">
-          1–6 выбирают башню, Q — обвал, пробел вызывает волну, P — пауза
+          1–6 — башни, Q W E R — способности, F — Гнев, пробел — волна, P — пауза
         </p>
       </div>
     </div>
