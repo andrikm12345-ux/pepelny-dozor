@@ -1022,6 +1022,40 @@ export function createSim(): Sim {
     if (world.particles.length > 280) world.particles.splice(0, world.particles.length - 280);
   }
 
+  /** Пыль у земли: серые лёгкие хлопья, оседают. */
+  function dust(x: number, y: number, count: number, spread = 0.3) {
+    for (let i = 0; i < count; i++) {
+      world.particles.push({
+        x: x + (Math.random() - 0.5) * spread,
+        y: y + (Math.random() - 0.5) * spread * 0.5,
+        vx: (Math.random() - 0.5) * 0.7,
+        vy: -0.1 - Math.random() * 0.35,
+        life: 0.35 + Math.random() * 0.3,
+        max: 0.65,
+        color: "#8a7f70",
+        size: 0.05 + Math.random() * 0.06,
+      });
+    }
+    if (world.particles.length > 280) world.particles.splice(0, world.particles.length - 280);
+  }
+
+  /** Столб искр вверх: улучшение, мастерство, продажа. */
+  function pillar(x: number, y: number, color: string, count = 14) {
+    for (let i = 0; i < count; i++) {
+      world.particles.push({
+        x: x + (Math.random() - 0.5) * 0.5,
+        y: y + 0.2,
+        vx: (Math.random() - 0.5) * 0.35,
+        vy: -(1.2 + Math.random() * 1.6),
+        life: 0.5 + Math.random() * 0.4,
+        max: 0.9,
+        color,
+        size: 0.04 + Math.random() * 0.06,
+      });
+    }
+    if (world.particles.length > 280) world.particles.splice(0, world.particles.length - 280);
+  }
+
   function float(x: number, y: number, text: string, color: string) {
     world.floaters.push({ x, y, text, life: 0.9, max: 0.9, color });
     if (world.floaters.length > 30) world.floaters.shift();
@@ -1566,6 +1600,14 @@ export function createSim(): Sim {
     combatLeft = queue.length;
     spawnGap = queue[0]?.gap ?? 0;
     phase = "combat";
+    for (const route of world.map.routes) {
+      const first = route[0]!;
+      addRing(first.x, first.y, 0.2, 2.2, "#e25b3a", 0.8);
+      addRing(first.x, first.y, 0.1, 1.2, "#ffd27a", 0.6);
+      addFlash(first.x, first.y, 3.4, "#e25b3a", 0.6);
+      burst(first.x, first.y, "#ffb35a", 16, 2.2);
+    }
+    world.shake = Math.min(1, world.shake + 0.25);
     banner = early > 0 ? `+${early} золота за спешку` : "";
     bannerT = early > 0 ? 2.2 : 0;
     sfx("wave");
@@ -2332,6 +2374,7 @@ export function createSim(): Sim {
       if (enemy.elite === "regen" && enemy.iceT <= 0 && enemy.hp < enemy.maxHp) {
         enemy.hp = Math.min(enemy.maxHp, enemy.hp + enemy.maxHp * ELITE_REGEN * dt);
       }
+      const stride = Math.floor(enemy.travel / 0.55);
       let mult = enemy.stun > 0 ? 0 : enemy.slowT > 0 ? enemy.slow : 1;
       if (mult > 0) {
         if (!enemy.flying && world.rubble.length && inRubble(enemy)) mult = Math.min(mult, RUBBLE_SLOW);
@@ -2342,6 +2385,11 @@ export function createSim(): Sim {
       enemy.vx = 0;
       enemy.vy = 0;
       advance(enemy, enemy.speed * mult * dt);
+      // на каждом шаге из-под лап поднимается пыль; летуны оставляют искры
+      if (enemy.alive && Math.floor(enemy.travel / 0.55) !== stride && world.particles.length < 200) {
+        if (enemy.flying) pillar(enemy.x, enemy.y + 0.1, enemy.color, 1);
+        else dust(enemy.x - enemy.vx * 0.15, enemy.y + 0.28 * enemy.scale, 2, 0.2);
+      }
     }
 
     healPulse(dt);
@@ -2505,6 +2553,9 @@ export function createSim(): Sim {
     refreshTowers();
     selectedId = tower.id;
     burst(col + 0.5, row + 0.5, "#e2b15a", 8, 1.1);
+    dust(col + 0.5, row + 0.85, 9, 0.7);
+    addRing(col + 0.5, row + 0.8, 0.1, 0.9, "#c9b99a", 0.4);
+    pillar(col + 0.5, row + 0.5, "#ffd98a", quiet ? 4 : 10);
     sfx("place");
     banner = def.name;
     bannerT = 1.4;
@@ -2767,6 +2818,8 @@ export function createSim(): Sim {
       else tower.rateRank++;
       refreshTowers();
       burst(tower.col + 0.5, tower.row + 0.5, "#e2b15a", 7, 1);
+      pillar(tower.col + 0.5, tower.row + 0.5, track === "dmg" ? "#ffd98a" : "#9ed6ff", 16);
+      addRing(tower.col + 0.5, tower.row + 0.8, 0.2, 1.1, track === "dmg" ? "#ffd98a" : "#9ed6ff", 0.5);
       sfx("upgrade");
       saveRun();
       flush();
@@ -2792,6 +2845,8 @@ export function createSim(): Sim {
       refreshTowers();
       const def = SPEC_BY_ID[spec];
       burst(tower.col + 0.5, tower.row + 0.5, def.color, 14, 1.4);
+      pillar(tower.col + 0.5, tower.row + 0.5, def.color, 26);
+      addFlash(tower.col + 0.5, tower.row + 0.5, 2.6, def.color, 0.5);
       addRing(tower.col + 0.5, tower.row + 0.5, 0.2, 1.1, def.color, 0.5);
       sfx("spec");
       banner = `${TOWERS[tower.kind].name}: ${def.name}`;
@@ -2810,6 +2865,8 @@ export function createSim(): Sim {
       refreshTowers();
       selectedId = 0;
       float(tower.col + 0.5, tower.row + 0.3, `+${refund}`, "#e2b15a");
+      dust(tower.col + 0.5, tower.row + 0.6, 14, 0.8);
+      pillar(tower.col + 0.5, tower.row + 0.5, "#e2b15a", 8);
       sfx("coin");
       saveRun();
       flush();
@@ -2966,7 +3023,7 @@ export function createSim(): Sim {
       for (const tower of world.towers) {
         if (TOWERS[tower.kind].aura > 0) continue;
         addRing(tower.col + 0.5, tower.row + 0.5, 0.2, 0.9, "#e2b15a", 0.5);
-        burst(tower.col + 0.5, tower.row + 0.5, "#e2b15a", 6, 1);
+        pillar(tower.col + 0.5, tower.row + 0.5, "#ffd98a", 10);
       }
       const left = upgradeSteps().length;
       if (done) sfx("upgrade");
