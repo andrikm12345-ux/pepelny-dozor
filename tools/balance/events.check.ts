@@ -1,6 +1,6 @@
 import { createSim } from "../../src/game/sim";
 import type { Creep } from "../../src/game/sim";
-import { ENEMIES, FREEZE_COOLDOWN, getMap, isRoad, type EnemyKind } from "../../src/game/balance";
+import { ENEMIES, FREEZE_COOLDOWN, campaignHp, getMap, isRoad, type EnemyKind } from "../../src/game/balance";
 
 const store = new Map<string, string>();
 (globalThis as any).localStorage = {
@@ -15,7 +15,8 @@ let uid = 9000;
 function mk(kind: EnemyKind, x: number, y: number, extra: Partial<Creep> = {}): Creep {
   const def = ENEMIES[kind];
   return { id: uid++, kind, x, y, route: 0, wpi: 1, travel: 0, hp: def.hp, maxHp: def.hp, speed: 0, gold: 1, armor: 1, flying: def.flying, scale: def.scale, color: def.color,
-    slow: 1, slowT: 0, flash: 0, alive: true, vx: 0, vy: 0, iceT: 0, healT: 99, shield: 0, stun: 0, brittleT: 0, brittle: 0, summonT: 99, ownerId: 0, ...extra };
+    slow: 1, slowT: 0, flash: 0, alive: true, vx: 0, vy: 0, iceT: 0, healT: 99, shield: 0, stun: 0, brittleT: 0, brittle: 0, summonT: 99, ownerId: 0,
+    dashT: 0, dashed: true, shellT: 0, shellCd: 99, blinked: true, castT: 99, reveal: 0, hidden: false, haste: false, elite: null, roars: 9, ...extra };
 }
 function freeCells(n: number) { const out: Array<[number, number]> = []; for (let r = 0; r < 11 && out.length < n; r++) for (let c = 0; c < 18 && out.length < n; c++) if (!isRoad(map, c, r) && (c + r) % 3 === 0) out.push([c, r]); return out; }
 
@@ -76,8 +77,9 @@ for (let i = 0; i < 150 && [...seen.values()].reduce((a, b) => a + Math.min(b, 2
     s.simulate(0.4);
     let hp = 0;
     for (let t = 0; t < 40 && !hp; t++) { s.simulate(0.1); const e = s.world.enemies.find((x) => x.alive); if (e) hp = e.maxHp; }
-    const base = ENEMIES[hp > 0 ? s.world.enemies.find((x) => x.alive)!.kind : "mite"].hp;
-    checks.push(["разведчик: −60 и твари тоньше на 25%", dg === -60 && Math.abs(hp / base - 0.75) < 0.03, `Δзолото ${dg}, hp ${hp} из ${base}`]);
+    // здоровье твари без события: базовое, умноженное на общий множитель волны
+    const base = ENEMIES[hp > 0 ? s.world.enemies.find((x) => x.alive)!.kind : "mite"].hp * campaignHp(s.getSnapshot().wave - 1);
+    checks.push(["разведчик: −60 и твари тоньше на 25%", dg === -60 && Math.abs(hp / base - 0.75) < 0.04, `Δзолото ${dg}, hp ${hp} из ${base.toFixed(1)}`]);
   }
   if (key === "scout" && opt === 1) checks.push(["разведчик: отмахнуться даёт +20", dg === 20, `Δзолото ${dg}`]);
 }

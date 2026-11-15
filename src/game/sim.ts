@@ -2,32 +2,97 @@ import {
   ABILITY_COOLDOWN,
   ABILITY_DELAY,
   ABILITY_RADIUS,
+  AFFIX_ORDER,
   BANNER_MAX,
+  BLINK_AT,
+  BLINK_DIST,
   BRITTLE_TIME,
   BURN_TIME,
   CHAIN_REACH,
   COLS,
+  DASH_MULT,
+  DASH_TIME,
   DIFFICULTIES,
+  ELITE_BLAST_RADIUS,
+  ELITE_BLAST_SILENCE,
+  ELITE_GOLD,
+  ELITE_REGEN,
+  ELITE_SWIFT,
+  ELITE_TOUGH,
   ENEMIES,
   FREEZE_BOSS,
   FREEZE_BRITTLE,
   FREEZE_COOLDOWN,
   FREEZE_TIME,
+  HASTE_MULT,
+  HASTE_RADIUS,
   HEAL_EVERY,
   HEAL_FRACTION,
   HEAL_RADIUS,
   MAX_RANK,
   NO_BUFF,
+  PERKS,
+  PERK_AFTERSHOCK,
+  PERK_AVALANCHE,
+  PERK_DISCOUNT,
+  PERK_EMBER_SPLASH,
+  PERK_EVERY,
+  PERK_FLETCHER,
+  PERK_FREEZE_TIME,
+  PERK_FURY,
+  PERK_FUSE,
+  PERK_GOLD,
+  PERK_LANTERN_SIGHT,
+  PERK_LANTERN_SLOW,
+  PERK_LIVES,
+  PERK_ORDER,
+  PERK_RALLY_TIME,
+  PERK_STORM_TARGETS,
   PREP_SECONDS,
+  RAGE_BOSS,
+  RAGE_ELITE,
+  RAGE_KILL,
+  RAGE_MINION,
+  RALLY_COOLDOWN,
+  RALLY_DMG,
+  RALLY_RATE,
+  RALLY_TIME,
+  REVEAL_TIME,
+  ROAR_AT,
+  ROAR_DASH,
+  ROAR_RADIUS,
+  ROAR_RUNNERS,
+  ROAR_SILENCE,
   ROWS,
+  RUBBLE_SLOW,
+  RUBBLE_TIME,
   SELL_RATIO,
+  SHATTER_FRACTION,
+  SHATTER_RADIUS,
+  SHELL_ARMOR,
+  SHELL_EVERY,
+  SHELL_SPEED,
+  SHELL_TIME,
+  SILENCE_EVERY,
+  SILENCE_RANGE,
+  SILENCE_TIME,
   SPECS,
   SPEC_BY_ID,
+  STORM_COOLDOWN,
+  STORM_STUN,
+  STORM_TARGETS,
   TOWERS,
+  TOWER_ORDER,
   MAPS,
   MAP_ORDER,
   WAVES,
+  WRATH_FALL,
+  WRATH_METEORS,
+  WRATH_NEED,
+  WRATH_RADIUS,
+  WRATH_TIME,
   abilityDamage,
+  eliteChance,
   gateOf,
   mapHp,
   getMap,
@@ -35,16 +100,20 @@ import {
   isRoad,
   specCost,
   specNeed,
+  stormDamage,
   towerStats,
   upgradeCost,
   wavePreview,
   waveScale,
   waveSpec,
+  wrathDamage,
+  type AffixId,
   type Buff,
   type Difficulty,
   type EnemyKind,
   type GameMap,
   type MapId,
+  type PerkId,
   type SpecId,
   type TargetMode,
   type TowerKind,
@@ -64,6 +133,11 @@ interface Bonus {
 }
 
 const NO_BONUS: Bonus = { dmg: 0, hp: 1, healers: 0 };
+
+/** Дары, из которых надо выбрать один. */
+export interface PerkView {
+  options: Array<{ id: PerkId; name: string; blurb: string }>;
+}
 
 /** Событие, ожидающее выбора. */
 export interface EventView {
@@ -88,6 +162,14 @@ interface SavedRun {
   leaked: number;
   abilityCd: number;
   freezeCd?: number;
+  stormCd?: number;
+  rallyCd?: number;
+  /** Накопленный гнев. */
+  rage?: number;
+  /** Взятые дары. */
+  perks?: PerkId[];
+  /** Дар ещё не выбран: после загрузки выбор откроется снова. */
+  perkDue?: boolean;
   /** Эффект события на следующую волну. */
   bonus?: Bonus;
   towers: Array<{
@@ -178,6 +260,28 @@ export interface Creep {
   ownerId: number;
   /** Секунд во льду после Заморозки. */
   iceT: number;
+  /** Секунд рывка осталось (бегун после удара, Таран после рёва). */
+  dashT: number;
+  /** Бегун уже делал рывок. */
+  dashed: boolean;
+  /** Секунд в панцире (латник). */
+  shellT: number;
+  /** Секунд до следующего панциря. */
+  shellCd: number;
+  /** Огонёк уже мерцал. */
+  blinked: boolean;
+  /** Секунд до следующего глушения башни (глушитель). */
+  castT: number;
+  /** Секунд Тень видна башням после попадания. */
+  reveal: number;
+  /** Тень сейчас не видна башням. */
+  hidden: boolean;
+  /** Идёт быстрее под горном. */
+  haste: boolean;
+  /** Свойство элитной твари. */
+  elite: AffixId | null;
+  /** Сколько раз Таран уже ревел. */
+  roars: number;
 }
 
 export interface Tower {
@@ -199,6 +303,8 @@ export interface Tower {
   buff: Buff;
   /** Итоговая дальность с рангами, веткой и знамёнами. */
   range: number;
+  /** Секунд башня заглушена и не стреляет. */
+  silenceT: number;
 }
 
 export interface Shot {
@@ -271,6 +377,40 @@ export interface Strike {
   y: number;
   t: number;
   max: number;
+  radius: number;
+  /** Доля урона: второй удар «Двойного удара» слабее. */
+  power: number;
+}
+
+/** Завал после Обвала: наземные идут медленнее. */
+export interface Rubble {
+  x: number;
+  y: number;
+  radius: number;
+  life: number;
+  max: number;
+}
+
+/** Метеор Гнева Димона, который ещё летит. */
+export interface Meteor {
+  x: number;
+  y: number;
+  t: number;
+  max: number;
+  radius: number;
+}
+
+/** Останки твари: спрайт, который рассыпается в пепел. */
+export interface Corpse {
+  x: number;
+  y: number;
+  kind: EnemyKind;
+  scale: number;
+  flip: boolean;
+  flying: boolean;
+  color: string;
+  life: number;
+  max: number;
 }
 
 /** Расходящееся кольцо: ударная волна, иней. */
@@ -315,8 +455,24 @@ export interface World {
   bolts: Bolt[];
   fires: Fire[];
   strikes: Strike[];
+  rubble: Rubble[];
+  meteors: Meteor[];
+  corpses: Corpse[];
   /** Секунд до конца вспышки Заморозки — для холодного света на поле. */
   freezeT: number;
+  /** Секунд до конца Набата: башни бьют чаще и сильнее. */
+  rallyT: number;
+  /** Секунд до конца Гнева Димона. */
+  wrathT: number;
+  /** Секунд до конца вспышки Грозы. */
+  stormT: number;
+  /** Секунд замедления после гибели Тарана. */
+  slowmo: number;
+  /** Радиус Обвала с учётом даров — для прицела. */
+  aimRadius: number;
+  /** Жизни и их начальное число — для света врат. */
+  lives: number;
+  livesMax: number;
   map: GameMap;
   hoverCol: number;
   hoverRow: number;
@@ -392,6 +548,26 @@ export interface Hud {
   abilityLeft: number;
   /** Секунд до готовности Заморозки; 0 — можно жать. */
   freezeLeft: number;
+  /** Секунд до готовности Грозы и Набата. */
+  stormLeft: number;
+  rallyLeft: number;
+  /** Полная перезарядка каждой способности — для кольца на кнопке. */
+  cooldowns: { rock: number; storm: number; freeze: number; rally: number };
+  /** Набат гудит прямо сейчас. */
+  rallyOn: boolean;
+  /** Гнев Димона: накоплено и сколько нужно. */
+  rage: number;
+  rageNeed: number;
+  /** Огненный дождь идёт прямо сейчас. */
+  wrathOn: boolean;
+  /** Выбор дара, который ждёт решения. */
+  perk: PerkView | null;
+  /** Взятые дары. */
+  perks: Array<{ id: PerkId; name: string; blurb: string }>;
+  /** Цена каждой башни с учётом даров. */
+  towerCost: Record<TowerKind, number>;
+  /** Кто прорвался к вратам за забег: по видам, от частых к редким. */
+  leakedKinds: Array<{ kind: EnemyKind; name: string; count: number }>;
   event: EventView | null;
   aiming: boolean;
   savedRun: RunSummary | null;
@@ -421,6 +597,10 @@ export interface Sim {
   continueRun(): void;
   toggleAim(): void;
   freeze(): void;
+  storm(): void;
+  rally(): void;
+  wrath(): void;
+  choosePerk(index: number): void;
   chooseEvent(index: 0 | 1): void;
   togglePause(): void;
   toggleSpeed(): void;
@@ -466,6 +646,7 @@ export function createSim(): Sim {
   let cleared = 0;
   let killed = 0;
   let leaked = 0;
+  const leakedBy = new Map<EnemyKind, number>();
   let best = perMap();
   let winsBy = perMap();
   let spawnCount = 0;
@@ -473,6 +654,19 @@ export function createSim(): Sim {
   let abilityShown = 0;
   let freezeCd = 0;
   let freezeShown = 0;
+  let stormCd = 0;
+  let stormShown = 0;
+  let rallyCd = 0;
+  let rallyShown = 0;
+  let rage = 0;
+  let rageShown = 0;
+  const perks = new Set<PerkId>();
+  let perkOptions: PerkId[] | null = null;
+  /** Задержки молний Грозы, которые ещё не ударили, и кого она уже била. */
+  let skyQueue: number[] = [];
+  const skyHit = new Set<number>();
+  let meteorsLeft = 0;
+  let meteorGap = 0;
   let eventId: EventId | null = null;
   let lastEvent: EventId | null = null;
   let bonus: Bonus = NO_BONUS;
@@ -511,7 +705,17 @@ export function createSim(): Sim {
     bolts: [],
     fires: [],
     strikes: [],
+    rubble: [],
+    meteors: [],
+    corpses: [],
     freezeT: 0,
+    rallyT: 0,
+    wrathT: 0,
+    stormT: 0,
+    slowmo: 0,
+    aimRadius: ABILITY_RADIUS,
+    lives: DIFFICULTIES[difficulty].lives,
+    livesMax: DIFFICULTIES[difficulty].lives,
     map: getMap(mapId),
     hoverCol: -1,
     hoverRow: -1,
@@ -528,8 +732,41 @@ export function createSim(): Sim {
 
   let snapshot = assemble();
 
+  function has(id: PerkId) {
+    return perks.has(id);
+  }
+
+  /** Цена с учётом дара «Свой кузнец». */
+  function price(base: number) {
+    return has("discount") ? Math.round(base * PERK_DISCOUNT) : base;
+  }
+
+  function rockCooldown() {
+    return ABILITY_COOLDOWN * (has("fuse") ? PERK_FUSE : 1);
+  }
+
+  function stormCooldown() {
+    return STORM_COOLDOWN * (has("fuse") ? PERK_FUSE : 1);
+  }
+
+  function rockRadius() {
+    return ABILITY_RADIUS * (has("avalanche") ? PERK_AVALANCHE : 1);
+  }
+
   function statsOf(tower: Tower) {
-    return towerStats(tower.kind, tower.dmgRank, tower.rateRank, tower.spec, tower.buff);
+    const st = towerStats(tower.kind, tower.dmgRank, tower.rateRank, tower.spec, tower.buff);
+    if (has("fletcher") && (tower.kind === "archer" || tower.kind === "ballista")) st.damage *= PERK_FLETCHER;
+    if (has("wires")) {
+      if (st.chain > 0) st.chain += 1;
+      if (tower.kind === "ember") st.splash *= PERK_EMBER_SPLASH;
+    }
+    if (has("lantern") && tower.kind === "frost") st.slow *= PERK_LANTERN_SLOW;
+    return st;
+  }
+
+  function perkView(): PerkView | null {
+    if (!perkOptions) return null;
+    return { options: perkOptions.map((id) => ({ id, name: PERKS[id].name, blurb: PERKS[id].blurb })) };
   }
 
   /** Усиление от двух самых сильных знамён рядом (BANNER_MAX). */
@@ -594,8 +831,8 @@ export function createSim(): Sim {
         blurb: def.blurb,
         dmgRank: tower.dmgRank,
         rateRank: tower.rateRank,
-        dmgCost: def.aura > 0 || tower.dmgRank >= MAX_RANK ? null : upgradeCost(def.cost, tower.dmgRank),
-        rateCost: def.aura > 0 || tower.rateRank >= MAX_RANK ? null : upgradeCost(def.cost, tower.rateRank),
+        dmgCost: def.aura > 0 || tower.dmgRank >= MAX_RANK ? null : price(upgradeCost(def.cost, tower.dmgRank)),
+        rateCost: def.aura > 0 || tower.rateRank >= MAX_RANK ? null : price(upgradeCost(def.cost, tower.rateRank)),
         sell: Math.floor(tower.spent * SELL_RATIO),
         target: tower.target,
         damage: Math.round(stats.damage),
@@ -608,7 +845,7 @@ export function createSim(): Sim {
         buffRange: Math.round(tower.buff.range * 100),
         spec: chosen && { id: chosen.id, name: chosen.name, blurb: chosen.blurb, color: chosen.color },
         specs: pair.map((item) => ({ id: item.id, name: item.name, blurb: item.blurb, color: item.color })),
-        specCost: specCost(tower.kind),
+        specCost: price(specCost(tower.kind)),
         specOpen: !tower.spec && ranks >= need,
         specNeed: need,
         ranks,
@@ -636,6 +873,19 @@ export function createSim(): Sim {
       towerCount: world.towers.length,
       abilityLeft: Math.ceil(abilityCd),
       freezeLeft: Math.ceil(freezeCd),
+      stormLeft: Math.ceil(stormCd),
+      rallyLeft: Math.ceil(rallyCd),
+      cooldowns: { rock: rockCooldown(), storm: stormCooldown(), freeze: FREEZE_COOLDOWN, rally: RALLY_COOLDOWN },
+      rallyOn: world.rallyT > 0,
+      rage: Math.floor(rage),
+      rageNeed: WRATH_NEED,
+      wrathOn: world.wrathT > 0,
+      perk: perkView(),
+      perks: [...perks].map((id) => ({ id, name: PERKS[id].name, blurb: PERKS[id].blurb })),
+      towerCost: Object.fromEntries(TOWER_ORDER.map((kind) => [kind, price(TOWERS[kind].cost)])) as Record<TowerKind, number>,
+      leakedKinds: [...leakedBy.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([kind, count]) => ({ kind, name: ENEMIES[kind].name, count })),
       event: eventView(),
       aiming,
       savedRun: savedRun
@@ -666,6 +916,9 @@ export function createSim(): Sim {
     world.build = build;
     world.selectedId = selectedId;
     world.aiming = aiming;
+    world.aimRadius = rockRadius();
+    world.lives = lives;
+    world.livesMax = DIFFICULTIES[phase === "menu" ? difficulty : runDifficulty].lives;
     snapshot = assemble();
     for (const listener of listeners) listener();
   }
@@ -774,29 +1027,99 @@ export function createSim(): Sim {
     }
   }
 
+  /** Гнев копится только в бою и не во время самого огненного дождя. */
+  function addRage(amount: number) {
+    if (phase !== "combat" || world.wrathT > 0) return;
+    const was = rage;
+    rage = Math.min(WRATH_NEED, rage + amount * (has("fury") ? PERK_FURY : 1));
+    if (was < WRATH_NEED && rage >= WRATH_NEED) {
+      banner = "Гнев Димона готов";
+      bannerT = 2.2;
+      sfx("spec");
+    }
+  }
+
+  /** Заглушить башню: она не стреляет. Набат не даёт глушить. */
+  function silenceTower(tower: Tower, time: number) {
+    if (world.rallyT > 0 || TOWERS[tower.kind].aura > 0) return false;
+    if (time <= tower.silenceT) return false;
+    tower.silenceT = time;
+    addRing(tower.col + 0.5, tower.row + 0.5, 0.15, 0.7, "#c46bff", 0.4);
+    return true;
+  }
+
+  function silenceAround(x: number, y: number, radius: number, time: number) {
+    let n = 0;
+    for (const tower of world.towers) {
+      const dx = tower.col + 0.5 - x;
+      const dy = tower.row + 0.5 - y;
+      if (dx * dx + dy * dy <= radius * radius && silenceTower(tower, time)) n++;
+    }
+    return n;
+  }
+
+  /** Осколки: замороженная тварь разлетается и ранит соседей. */
+  function shatter(enemy: Creep) {
+    const dmg = enemy.maxHp * SHATTER_FRACTION;
+    const r2 = SHATTER_RADIUS * SHATTER_RADIUS;
+    addRing(enemy.x, enemy.y, 0.1, SHATTER_RADIUS, "#cfe7f0", 0.4);
+    burst(enemy.x, enemy.y, "#dff3ff", 10, 2);
+    sfx("shatter");
+    for (const other of world.enemies) {
+      if (!other.alive) continue;
+      const dx = other.x - enemy.x;
+      const dy = other.y - enemy.y;
+      if (dx * dx + dy * dy > r2) continue;
+      hurtEnemy(other, plainShot("frost", dmg, enemy.x, enemy.y, "#cfe7f0", { pierce: true }));
+    }
+  }
+
   function killEnemy(enemy: Creep) {
     if (!enemy.alive) return;
     enemy.alive = false;
-    gold += enemy.gold;
+    const reward = has("marauder") ? Math.round(enemy.gold * PERK_GOLD) : enemy.gold;
+    gold += reward;
     killed++;
-    float(enemy.x, enemy.y - 0.2, `+${enemy.gold}`, "#e2b15a");
+    addRage(enemy.kind === "boss" ? RAGE_BOSS : enemy.ownerId ? RAGE_MINION : enemy.elite ? RAGE_ELITE : RAGE_KILL);
+    float(enemy.x, enemy.y - 0.2, `+${reward}`, "#e2b15a");
     burst(enemy.x, enemy.y, enemy.color, enemy.kind === "boss" ? 18 : 8, enemy.kind === "boss" ? 2.2 : 1.3);
     addDecal(enemy.x, enemy.y, enemy.scale);
     addFlash(enemy.x, enemy.y, 1.3, enemy.color, 0.3);
+    world.corpses.push({
+      x: enemy.x,
+      y: enemy.y,
+      kind: enemy.kind,
+      scale: enemy.scale,
+      flip: enemy.vx < -0.2,
+      flying: enemy.flying,
+      color: enemy.color,
+      life: 0.5,
+      max: 0.5,
+    });
+    if (world.corpses.length > 40) world.corpses.shift();
     if (enemy.kind === "boss") {
       world.shake = Math.min(1, world.shake + 0.65);
+      world.slowmo = 0.9;
       addRing(enemy.x, enemy.y, 0.3, 3.2, "#e2b15a", 0.8);
       addFlash(enemy.x, enemy.y, 4, "#ffb35a", 0.7);
       sfx("boom");
     }
     sfx("coin");
     dirty = true;
+    if (enemy.iceT > 0) shatter(enemy);
+    if (enemy.elite === "volatile") {
+      silenceAround(enemy.x, enemy.y, ELITE_BLAST_RADIUS, ELITE_BLAST_SILENCE);
+      addRing(enemy.x, enemy.y, 0.2, ELITE_BLAST_RADIUS, "#c46bff", 0.5);
+      addFlash(enemy.x, enemy.y, 2.4, "#c46bff", 0.4);
+      sfx("silence");
+    }
   }
 
   function leakEnemy(enemy: Creep) {
     if (!enemy.alive) return;
     enemy.alive = false;
     leaked++;
+    leakedBy.set(enemy.kind, (leakedBy.get(enemy.kind) ?? 0) + 1);
     if (phase !== "defeat") {
       lives = Math.max(0, lives - 1);
       world.shake = Math.min(1, world.shake + (enemy.kind === "boss" ? 1 : 0.55));
@@ -819,6 +1142,9 @@ export function createSim(): Sim {
   }
 
   function hurtEnemy(enemy: Creep, shot: Shot) {
+    if (!enemy.alive) return;
+    // любое попадание выдаёт Тень башням
+    if (enemy.kind === "shade") enemy.reveal = REVEAL_TIME;
     if (enemy.shield > 0) {
       // щит гасит любое попадание целиком
       enemy.shield--;
@@ -831,6 +1157,11 @@ export function createSim(): Sim {
     }
     let amount = shot.damage;
     if (enemy.armor < 1 && !shot.pierce) amount *= enemy.armor;
+    if (enemy.shellT > 0 && !shot.pierce) {
+      amount *= SHELL_ARMOR;
+      addRing(enemy.x, enemy.y, 0.25, 0.5, "#c9d2d6", 0.2);
+      sfx("shield");
+    }
     if (enemy.brittleT > 0) amount *= 1 + enemy.brittle;
     enemy.hp -= amount;
     enemy.flash = 0.14;
@@ -852,12 +1183,66 @@ export function createSim(): Sim {
       enemy.brittleT = BRITTLE_TIME;
     }
     sfx("hit");
-    if (enemy.hp <= 0) killEnemy(enemy);
+    if (enemy.hp <= 0) {
+      killEnemy(enemy);
+      return;
+    }
+    // умения, которые срабатывают от удара
+    if (enemy.kind === "runner" && !enemy.dashed) {
+      enemy.dashed = true;
+      enemy.dashT = DASH_TIME;
+      addRing(enemy.x, enemy.y, 0.1, 0.5, "#fff3d6", 0.25);
+      sfx("dash");
+    } else if (enemy.kind === "wisp" && !enemy.blinked && enemy.hp <= enemy.maxHp * BLINK_AT) {
+      blink(enemy);
+    } else if (enemy.kind === "boss" && enemy.roars < ROAR_AT.length && enemy.hp <= enemy.maxHp * ROAR_AT[enemy.roars]!) {
+      roar(enemy);
+    }
+  }
+
+  /** Огонёк перескакивает вперёд по тропе. */
+  function blink(enemy: Creep) {
+    enemy.blinked = true;
+    const fromX = enemy.x;
+    const fromY = enemy.y;
+    advance(enemy, BLINK_DIST);
+    if (!enemy.alive) return;
+    world.bolts.push({ pts: [{ x: fromX, y: fromY }, { x: enemy.x, y: enemy.y }], life: 0.3, max: 0.3, beam: "#f0d8bf" });
+    if (world.bolts.length > 30) world.bolts.shift();
+    addRing(fromX, fromY, 0.1, 0.6, "#f0d8bf", 0.35);
+    addFlash(enemy.x, enemy.y, 1.2, "#f0d8bf", 0.3);
+    sfx("blink");
+  }
+
+  /** Рёв Тарана: башни рядом глохнут, сам он делает рывок и зовёт бегунов. */
+  function roar(boss: Creep) {
+    boss.roars++;
+    silenceAround(boss.x, boss.y, ROAR_RADIUS, ROAR_SILENCE);
+    boss.dashT = ROAR_DASH;
+    for (let i = 0; i < ROAR_RUNNERS; i++) {
+      const minion = makeCreep("runner", boss.route, boss.x + (Math.random() - 0.5) * 0.4, boss.y + (Math.random() - 0.5) * 0.4, 0.5);
+      minion.wpi = boss.wpi;
+      minion.travel = boss.travel;
+      minion.ownerId = boss.id;
+      world.enemies.push(minion);
+      byId.set(minion.id, minion);
+    }
+    combatTotal += ROAR_RUNNERS;
+    addRing(boss.x, boss.y, 0.3, ROAR_RADIUS, "#e25b3a", 0.7);
+    addRing(boss.x, boss.y, 0.2, ROAR_RADIUS * 0.6, "#ffb35a", 0.5);
+    addFlash(boss.x, boss.y, 4, "#e25b3a", 0.6);
+    world.shake = Math.min(1, world.shake + 0.5);
+    sfx("roar");
+    banner = "Таран ревёт: башни рядом оглохли";
+    bannerT = 2.4;
+    dirty = true;
   }
 
   /** Урон от огня: щит не гасит, броня действует. */
   function burnEnemy(enemy: Creep, amount: number) {
     let dmg = amount * (enemy.armor < 1 ? enemy.armor : 1);
+    if (enemy.shellT > 0) dmg *= SHELL_ARMOR;
+    if (enemy.kind === "shade") enemy.reveal = Math.max(enemy.reveal, 0.5);
     if (enemy.brittleT > 0) dmg *= 1 + enemy.brittle;
     enemy.hp -= dmg;
     if (enemy.hp <= 0) killEnemy(enemy);
@@ -926,7 +1311,31 @@ export function createSim(): Sim {
       summonT: def.summon ? def.summon.every * (0.4 + Math.random() * 0.4) : 0,
       ownerId: 0,
       iceT: 0,
+      dashT: 0,
+      dashed: false,
+      shellT: 0,
+      shellCd: kind === "husk" ? SHELL_EVERY * (0.3 + Math.random() * 0.7) : 0,
+      blinked: false,
+      castT: kind === "silencer" ? SILENCE_EVERY * (0.3 + Math.random() * 0.4) : 0,
+      reveal: 0,
+      hidden: kind === "shade",
+      haste: false,
+      elite: null,
+      roars: 0,
     };
+  }
+
+  /** Сделать тварь элитной: случайное свойство и двойное золото. */
+  function makeElite(enemy: Creep) {
+    const affix = AFFIX_ORDER[Math.floor(Math.random() * AFFIX_ORDER.length)]!;
+    enemy.elite = affix;
+    enemy.gold *= ELITE_GOLD;
+    if (affix === "swift") enemy.speed *= ELITE_SWIFT;
+    if (affix === "tough") {
+      enemy.hp = Math.round(enemy.hp * ELITE_TOUGH);
+      enemy.maxHp = enemy.hp;
+      enemy.scale *= 1.12;
+    }
   }
 
   function spawn(kind: EnemyKind) {
@@ -943,6 +1352,7 @@ export function createSim(): Sim {
       origin.x + Math.cos(ang + Math.PI / 2) * side,
       origin.y + Math.sin(ang + Math.PI / 2) * side,
     );
+    if (kind !== "boss" && Math.random() < eliteChance(waveIndex, runDifficulty)) makeElite(enemy);
     world.enemies.push(enemy);
     byId.set(enemy.id, enemy);
     if (kind === "boss") {
@@ -981,6 +1391,123 @@ export function createSim(): Sim {
       sfx("summon");
       dirty = true;
     }
+  }
+
+  /** Глушители выключают ближайшую башню, горнисты ускоряют стаю, Тени прячутся от башен. */
+  function skillPulse(dt: number) {
+    let drummers = false;
+    for (const enemy of world.enemies) {
+      enemy.haste = false;
+      if (enemy.alive && enemy.kind === "drummer") drummers = true;
+    }
+    for (const caster of world.enemies) {
+      if (!caster.alive) continue;
+      if (drummers && caster.kind === "drummer") {
+        const r2 = HASTE_RADIUS * HASTE_RADIUS;
+        for (const other of world.enemies) {
+          if (!other.alive || other === caster || other.kind === "drummer") continue;
+          const dx = other.x - caster.x;
+          const dy = other.y - caster.y;
+          if (dx * dx + dy * dy <= r2) other.haste = true;
+        }
+      } else if (caster.kind === "silencer" && caster.stun <= 0) {
+        caster.castT -= dt;
+        if (caster.castT > 0) continue;
+        let best: Tower | null = null;
+        let bestD = SILENCE_RANGE * SILENCE_RANGE;
+        for (const tower of world.towers) {
+          if (TOWERS[tower.kind].aura > 0 || tower.silenceT > 0) continue;
+          const dx = tower.col + 0.5 - caster.x;
+          const dy = tower.row + 0.5 - caster.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 <= bestD) {
+            bestD = d2;
+            best = tower;
+          }
+        }
+        if (!best || !silenceTower(best, SILENCE_TIME)) {
+          caster.castT = 0.6;
+          continue;
+        }
+        caster.castT = SILENCE_EVERY;
+        world.bolts.push({
+          pts: [
+            { x: caster.x, y: caster.y },
+            { x: best.col + 0.5, y: best.row + 0.5 },
+          ],
+          life: 0.4,
+          max: 0.4,
+          beam: "#c46bff",
+        });
+        if (world.bolts.length > 30) world.bolts.shift();
+        addFlash(best.col + 0.5, best.row + 0.5, 1.4, "#c46bff", 0.35);
+        sfx("silence");
+      } else if (caster.kind === "shade") {
+        let lit = caster.reveal > 0;
+        if (!lit) {
+          const extra = has("lantern") ? PERK_LANTERN_SIGHT : 0;
+          for (const tower of world.towers) {
+            if (tower.kind !== "frost" || tower.silenceT > 0) continue;
+            const dx = tower.col + 0.5 - caster.x;
+            const dy = tower.row + 0.5 - caster.y;
+            const reach = tower.range + extra;
+            if (dx * dx + dy * dy <= reach * reach) {
+              lit = true;
+              break;
+            }
+          }
+        }
+        caster.hidden = !lit;
+      }
+    }
+  }
+
+  /** Сдвинуть тварь вдоль её тропы на dist клеток; дошла до врат — пропущена. */
+  function advance(enemy: Creep, dist: number) {
+    let left = dist;
+    const points = world.map.routes[enemy.route]!;
+    while (left > 0 && enemy.alive) {
+      const wp = points[enemy.wpi];
+      if (!wp) {
+        leakEnemy(enemy);
+        break;
+      }
+      const dx = wp.x - enemy.x;
+      const dy = wp.y - enemy.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 0.0001) {
+        enemy.wpi++;
+        if (enemy.wpi >= points.length) leakEnemy(enemy);
+        continue;
+      }
+      enemy.vx = dx / d;
+      enemy.vy = dy / d;
+      if (d <= left + 0.0001) {
+        enemy.x = wp.x;
+        enemy.y = wp.y;
+        enemy.travel += d;
+        left -= d;
+        enemy.wpi++;
+        if (enemy.wpi >= points.length) {
+          leakEnemy(enemy);
+          break;
+        }
+      } else {
+        enemy.x += (dx / d) * left;
+        enemy.y += (dy / d) * left;
+        enemy.travel += left;
+        left = 0;
+      }
+    }
+  }
+
+  function inRubble(enemy: Creep) {
+    for (const pile of world.rubble) {
+      const dx = enemy.x - pile.x;
+      const dy = enemy.y - pile.y;
+      if (dx * dx + dy * dy <= pile.radius * pile.radius) return true;
+    }
+    return false;
   }
 
   /** Горящая земля жжёт всех наземных, кто в пятне. */
@@ -1044,10 +1571,29 @@ export function createSim(): Sim {
       bonus = NO_BONUS;
       save();
       saveRun();
-      // после каждой второй волны на тропе что-то происходит; таймер ждёт выбора
-      if (cleared % 2 === 0) openEvent();
+      // после каждой третьей волны — дар Димона, после остальных чётных — событие; таймер ждёт выбора
+      if (cleared % PERK_EVERY === 0 && openPerks()) saveRun();
+      else if (cleared % 2 === 0) openEvent();
     }
+    skyQueue = [];
+    skyHit.clear();
+    meteorsLeft = 0;
     dirty = true;
+  }
+
+  /** Предложить три случайных дара из ещё не взятых. */
+  function openPerks(): boolean {
+    const pool = PERK_ORDER.filter((id) => !perks.has(id));
+    if (!pool.length) return false;
+    const pick: PerkId[] = [];
+    while (pick.length < 3 && pool.length) pick.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]!);
+    perkOptions = pick;
+    prepLeft = null;
+    prepShown = 0;
+    banner = "Дар Димона";
+    bannerT = 2.5;
+    sfx("perk");
+    return true;
   }
 
   function openEvent() {
@@ -1078,14 +1624,33 @@ export function createSim(): Sim {
     abilityShown = 0;
     freezeCd = 0;
     freezeShown = 0;
+    stormCd = 0;
+    stormShown = 0;
+    rallyCd = 0;
+    rallyShown = 0;
+    rage = 0;
+    rageShown = 0;
+    perks.clear();
+    perkOptions = null;
+    skyQueue = [];
+    skyHit.clear();
+    meteorsLeft = 0;
+    meteorGap = 0;
     eventId = null;
     lastEvent = null;
     bonus = NO_BONUS;
     world.freezeT = 0;
+    world.rallyT = 0;
+    world.wrathT = 0;
+    world.stormT = 0;
+    world.slowmo = 0;
     aiming = false;
     world.bolts = [];
     world.fires = [];
     world.strikes = [];
+    world.rubble = [];
+    world.meteors = [];
+    world.corpses = [];
     occ.clear();
     byId.clear();
     queue = [];
@@ -1095,6 +1660,7 @@ export function createSim(): Sim {
     cleared = 0;
     killed = 0;
     leaked = 0;
+    leakedBy.clear();
     paused = false;
     speed = 1;
     build = null;
@@ -1124,7 +1690,7 @@ export function createSim(): Sim {
     const r2 = tower.range * tower.range;
     const found: Array<{ enemy: Creep; score: number }> = [];
     for (const enemy of world.enemies) {
-      if (!enemy.alive) continue;
+      if (!enemy.alive || enemy.hidden) continue;
       if (enemy.flying && !hitsFlying) continue;
       const dx = enemy.x - cx;
       const dy = enemy.y - cy;
@@ -1187,7 +1753,7 @@ export function createSim(): Sim {
       let next: Creep | null = null;
       let bestD = CHAIN_REACH * CHAIN_REACH;
       for (const enemy of world.enemies) {
-        if (!enemy.alive || hit.has(enemy.id)) continue;
+        if (!enemy.alive || enemy.hidden || hit.has(enemy.id)) continue;
         const dx = enemy.x - current.x;
         const dy = enemy.y - current.y;
         const d2 = dx * dx + dy * dy;
@@ -1264,9 +1830,9 @@ export function createSim(): Sim {
     const landed = world.strikes.filter((strike) => strike.t <= 0);
     if (!landed.length) return;
     world.strikes = world.strikes.filter((strike) => strike.t > 0);
-    for (const { x, y } of landed) {
-      const damage = abilityDamage(waveIndex);
-      const r2 = ABILITY_RADIUS * ABILITY_RADIUS;
+    for (const { x, y, radius, power } of landed) {
+      const damage = abilityDamage(waveIndex) * power;
+      const r2 = radius * radius;
       for (const enemy of world.enemies) {
         if (!enemy.alive) continue;
         const dx = enemy.x - x;
@@ -1275,8 +1841,11 @@ export function createSim(): Sim {
         enemy.shield = 0;
         hurtEnemy(enemy, plainShot("ballista", damage, x, y, "#e2b15a", { pierce: true, slow: 0.4, slowTime: 2 }));
       }
-      addRing(x, y, 0.2, ABILITY_RADIUS, "#e2b15a", 0.5);
-      addRing(x, y, 0.1, ABILITY_RADIUS * 0.6, "#ffffff", 0.35);
+      // завал: наземные в нём идут медленнее
+      world.rubble.push({ x, y, radius: radius * 0.95, life: RUBBLE_TIME, max: RUBBLE_TIME });
+      if (world.rubble.length > 6) world.rubble.shift();
+      addRing(x, y, 0.2, radius, "#e2b15a", 0.5);
+      addRing(x, y, 0.1, radius * 0.6, "#ffffff", 0.35);
       addFlash(x, y, 4.5, "#ffb35a", 0.5);
       burst(x, y, "#9a8a74", 26, 2.4);
       burst(x, y, "#e2b15a", 10, 1.6);
@@ -1292,10 +1861,155 @@ export function createSim(): Sim {
       flush();
       return;
     }
-    abilityCd = ABILITY_COOLDOWN;
+    abilityCd = rockCooldown();
     abilityShown = Math.ceil(abilityCd);
-    world.strikes.push({ x: fx, y: fy, t: ABILITY_DELAY, max: ABILITY_DELAY });
+    const radius = rockRadius();
+    world.strikes.push({ x: fx, y: fy, t: ABILITY_DELAY, max: ABILITY_DELAY, radius, power: 1 });
+    if (has("aftershock")) {
+      world.strikes.push({ x: fx, y: fy, t: ABILITY_DELAY + 1, max: ABILITY_DELAY + 1, radius, power: PERK_AFTERSHOCK });
+    }
     flush();
+  }
+
+  /** Гроза Димона: молнии по самым здоровым тварям, по одной с короткой паузой. */
+  function castStorm() {
+    stormCd = stormCooldown();
+    stormShown = Math.ceil(stormCd);
+    const n = STORM_TARGETS + (has("stormfront") ? PERK_STORM_TARGETS : 0);
+    skyHit.clear();
+    skyQueue = Array.from({ length: n }, (_, i) => 0.12 + i * 0.09);
+    world.stormT = 0.45;
+    sfx("storm");
+    banner = "Гроза";
+    bannerT = 1.4;
+    flush();
+  }
+
+  function updateStorm(dt: number) {
+    if (world.stormT > 0) world.stormT = Math.max(0, world.stormT - dt);
+    if (!skyQueue.length) return;
+    for (let i = 0; i < skyQueue.length; i++) skyQueue[i]! -= dt;
+    while (skyQueue.length && skyQueue[0]! <= 0) {
+      skyQueue.shift();
+      let target: Creep | null = null;
+      for (const enemy of world.enemies) {
+        if (!enemy.alive || skyHit.has(enemy.id)) continue;
+        if (!target || enemy.hp > target.hp) target = enemy;
+      }
+      if (!target) {
+        skyQueue = [];
+        break;
+      }
+      skyHit.add(target.id);
+      const { x, y } = target;
+      target.shield = 0;
+      hurtEnemy(target, plainShot("tesla", stormDamage(waveIndex), x, y, "#8fd6ff", { pierce: true, stun: STORM_STUN }));
+      world.bolts.push({
+        pts: [
+          { x: x + (Math.random() - 0.5) * 2.4, y: y - 9 },
+          { x: x + (Math.random() - 0.5) * 0.8, y: y - 4 },
+          { x, y },
+        ],
+        life: 0.3,
+        max: 0.3,
+      });
+      if (world.bolts.length > 30) world.bolts.shift();
+      addFlash(x, y, 2.4, "#bfe6ff", 0.3);
+      addRing(x, y, 0.1, 0.9, "#bfe6ff", 0.3);
+      burst(x, y, "#dff4ff", 8, 1.8);
+      world.shake = Math.min(1, world.shake + 0.12);
+      world.stormT = Math.max(world.stormT, 0.12);
+      sfx("tesla");
+      dirty = true;
+    }
+  }
+
+  /** Набат Димона: башни бьют чаще и сильнее, глушение снято и не действует. */
+  function castRally() {
+    rallyCd = RALLY_COOLDOWN;
+    rallyShown = Math.ceil(rallyCd);
+    world.rallyT = RALLY_TIME + (has("longbell") ? PERK_RALLY_TIME : 0);
+    for (const tower of world.towers) {
+      tower.silenceT = 0;
+      addRing(tower.col + 0.5, tower.row + 0.5, 0.2, 0.9, "#ffd88a", 0.5);
+    }
+    const gate = gateOf(world.map);
+    addFlash(gate.x, gate.y, 5, "#ffd88a", 0.6);
+    sfx("rally");
+    banner = "Набат: башни бьют чаще";
+    bannerT = 1.8;
+    flush();
+  }
+
+  /** Гнев Димона: огненный дождь по тварям. */
+  function castWrath() {
+    rage = 0;
+    rageShown = 0;
+    world.wrathT = WRATH_TIME;
+    meteorsLeft = WRATH_METEORS;
+    meteorGap = 0.15;
+    world.shake = Math.min(1, world.shake + 0.5);
+    addFlash(COLS / 2, ROWS / 2, 14, "#ff7a3a", 0.8);
+    sfx("wrath");
+    banner = "Гнев Димона";
+    bannerT = 2.2;
+    flush();
+  }
+
+  /** Куда упадёт следующий метеор: в случайную тварь с упреждением, а без тварей — на тропу. */
+  function meteorAim(): { x: number; y: number } {
+    const alive = world.enemies.filter((enemy) => enemy.alive);
+    if (alive.length) {
+      const enemy = alive[Math.floor(Math.random() * alive.length)]!;
+      const lead = enemy.stun > 0 ? 0 : enemy.speed * WRATH_FALL * 0.7;
+      return { x: enemy.x + enemy.vx * lead, y: enemy.y + enemy.vy * lead };
+    }
+    const route = world.map.routes[Math.floor(Math.random() * world.map.routes.length)]!;
+    const i = Math.floor(Math.random() * (route.length - 1));
+    const a = route[i]!;
+    const b = route[i + 1]!;
+    const t = Math.random();
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  }
+
+  function updateWrath(dt: number) {
+    if (world.wrathT > 0) {
+      world.wrathT = Math.max(0, world.wrathT - dt);
+      if (world.wrathT === 0) dirty = true;
+      meteorGap -= dt;
+      while (meteorsLeft > 0 && meteorGap <= 0) {
+        meteorGap += (WRATH_TIME - WRATH_FALL - 0.3) / WRATH_METEORS;
+        meteorsLeft--;
+        const aim = meteorAim();
+        world.meteors.push({ x: aim.x, y: aim.y, t: WRATH_FALL, max: WRATH_FALL, radius: WRATH_RADIUS });
+      }
+    }
+    if (!world.meteors.length) return;
+    for (const meteor of world.meteors) meteor.t -= dt;
+    const landed = world.meteors.filter((meteor) => meteor.t <= 0);
+    if (!landed.length) return;
+    world.meteors = world.meteors.filter((meteor) => meteor.t > 0);
+    const damage = wrathDamage(waveIndex);
+    for (const { x, y, radius } of landed) {
+      const r2 = radius * radius;
+      for (const enemy of world.enemies) {
+        if (!enemy.alive) continue;
+        const dx = enemy.x - x;
+        const dy = enemy.y - y;
+        if (dx * dx + dy * dy > r2) continue;
+        hurtEnemy(enemy, plainShot("ember", damage, x, y, "#ff7a3a", { pierce: true }));
+      }
+      world.fires.push({ x, y, radius: radius * 0.8, dps: damage * 0.2, life: 1.6, max: 1.6 });
+      if (world.fires.length > 24) world.fires.shift();
+      addRing(x, y, 0.2, radius, "#ff8a4a", 0.45);
+      addFlash(x, y, 3.2, "#ff9a4a", 0.45);
+      burst(x, y, "#ffb35a", 12, 2.2);
+      burst(x, y, "#6b5a50", 6, 1.4);
+      addDecal(x, y, 1.3);
+      world.shake = Math.min(1, world.shake + 0.22);
+      sfx("boom");
+    }
+    dirty = true;
   }
 
   /** Заморозка Димона: всё на поле встаёт на пару секунд и получает лишний урон. */
@@ -1305,7 +2019,8 @@ export function createSim(): Sim {
     world.freezeT = 0.9;
     for (const enemy of world.enemies) {
       if (!enemy.alive) continue;
-      const time = enemy.kind === "boss" ? FREEZE_BOSS : FREEZE_TIME;
+      const time = enemy.kind === "boss" ? FREEZE_BOSS : FREEZE_TIME + (has("permafrost") ? PERK_FREEZE_TIME : 0);
+      if (enemy.kind === "shade") enemy.reveal = Math.max(enemy.reveal, time + 1);
       enemy.stun = Math.max(enemy.stun, time);
       enemy.iceT = Math.max(enemy.iceT, time);
       enemy.brittle = Math.max(enemy.brittleT > 0 ? enemy.brittle : 0, FREEZE_BRITTLE);
@@ -1337,6 +2052,11 @@ export function createSim(): Sim {
       leaked,
       abilityCd,
       freezeCd,
+      stormCd,
+      rallyCd,
+      rage,
+      perks: [...perks],
+      perkDue: perkOptions !== null,
       bonus,
       towers: world.towers.map((tower) => ({
         kind: tower.kind,
@@ -1410,6 +2130,13 @@ export function createSim(): Sim {
         leaked: Math.max(0, num(r.leaked)),
         abilityCd: Math.max(0, Math.min(ABILITY_COOLDOWN, num(r.abilityCd))),
         freezeCd: Math.max(0, Math.min(FREEZE_COOLDOWN, num(r.freezeCd))),
+        stormCd: Math.max(0, Math.min(STORM_COOLDOWN, num(r.stormCd))),
+        rallyCd: Math.max(0, Math.min(RALLY_COOLDOWN, num(r.rallyCd))),
+        rage: Math.max(0, Math.min(WRATH_NEED, num(r.rage))),
+        perks: (Array.isArray(r.perks) ? r.perks : []).filter(
+          (id, index, all): id is PerkId => typeof id === "string" && id in PERKS && all.indexOf(id) === index,
+        ),
+        perkDue: r.perkDue === true,
         bonus: {
           dmg: Math.max(0, Math.min(1, num(r.bonus?.dmg))),
           hp: Math.max(0.5, Math.min(1, num(r.bonus?.hp, 1))),
@@ -1426,6 +2153,10 @@ export function createSim(): Sim {
     const def = TOWERS[tower.kind];
     const stats = statsOf(tower);
     stats.damage *= 1 + bonus.dmg;
+    if (world.rallyT > 0) {
+      stats.damage *= 1 + RALLY_DMG;
+      stats.rate *= 1 + RALLY_RATE;
+    }
     tower.cooldown += 1 / stats.rate;
     tower.recoil = 1;
     const sx = tower.col + 0.5;
@@ -1494,8 +2225,34 @@ export function createSim(): Sim {
         dirty = true;
       }
     }
+    if (phase === "combat" && stormCd > 0) {
+      stormCd = Math.max(0, stormCd - dt);
+      const shown = Math.ceil(stormCd);
+      if (shown !== stormShown) {
+        stormShown = shown;
+        dirty = true;
+      }
+    }
+    if (phase === "combat" && rallyCd > 0) {
+      rallyCd = Math.max(0, rallyCd - dt);
+      const shown = Math.ceil(rallyCd);
+      if (shown !== rallyShown) {
+        rallyShown = shown;
+        dirty = true;
+      }
+    }
+    if (world.rallyT > 0) {
+      world.rallyT = Math.max(0, world.rallyT - dt);
+      if (world.rallyT === 0) dirty = true;
+    }
+    if (Math.floor(rage) !== rageShown) {
+      rageShown = Math.floor(rage);
+      dirty = true;
+    }
     if (world.freezeT > 0) world.freezeT = Math.max(0, world.freezeT - dt);
     updateStrikes(dt);
+    updateStorm(dt);
+    updateWrath(dt);
     world.shake *= Math.exp(-2.8 * dt);
 
     if (phase === "prep") {
@@ -1526,6 +2283,7 @@ export function createSim(): Sim {
       }
     }
 
+    skillPulse(dt);
     for (const enemy of world.enemies) {
       if (!enemy.alive) continue;
       if (enemy.slowT > 0) enemy.slowT = Math.max(0, enemy.slowT - dt);
@@ -1533,44 +2291,32 @@ export function createSim(): Sim {
       if (enemy.brittleT > 0) enemy.brittleT = Math.max(0, enemy.brittleT - dt);
       if (enemy.stun > 0) enemy.stun = Math.max(0, enemy.stun - dt);
       if (enemy.iceT > 0) enemy.iceT = Math.max(0, enemy.iceT - dt);
-      const mult = enemy.stun > 0 ? 0 : enemy.slowT > 0 ? enemy.slow : 1;
-      let left = enemy.speed * mult * dt;
-      enemy.vx = 0;
-      enemy.vy = 0;
-      const points = world.map.routes[enemy.route]!;
-      while (left > 0 && enemy.alive) {
-        const wp = points[enemy.wpi];
-        if (!wp) {
-          leakEnemy(enemy);
-          break;
-        }
-        const dx = wp.x - enemy.x;
-        const dy = wp.y - enemy.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist < 0.0001) {
-          enemy.wpi++;
-          if (enemy.wpi >= points.length) leakEnemy(enemy);
-          continue;
-        }
-        enemy.vx = dx / dist;
-        enemy.vy = dy / dist;
-        if (dist <= left + 0.0001) {
-          enemy.x = wp.x;
-          enemy.y = wp.y;
-          enemy.travel += dist;
-          left -= dist;
-          enemy.wpi++;
-          if (enemy.wpi >= points.length) {
-            leakEnemy(enemy);
-            break;
+      if (enemy.dashT > 0) enemy.dashT = Math.max(0, enemy.dashT - dt);
+      if (enemy.reveal > 0) enemy.reveal = Math.max(0, enemy.reveal - dt);
+      if (enemy.kind === "husk") {
+        if (enemy.shellT > 0) enemy.shellT = Math.max(0, enemy.shellT - dt);
+        else if (enemy.stun <= 0) {
+          enemy.shellCd -= dt;
+          if (enemy.shellCd <= 0) {
+            enemy.shellT = SHELL_TIME;
+            enemy.shellCd = SHELL_EVERY;
+            addRing(enemy.x, enemy.y, 0.5, 0.2, "#c9d2d6", 0.3);
           }
-        } else {
-          enemy.x += (dx / dist) * left;
-          enemy.y += (dy / dist) * left;
-          enemy.travel += left;
-          left = 0;
         }
       }
+      if (enemy.elite === "regen" && enemy.iceT <= 0 && enemy.hp < enemy.maxHp) {
+        enemy.hp = Math.min(enemy.maxHp, enemy.hp + enemy.maxHp * ELITE_REGEN * dt);
+      }
+      let mult = enemy.stun > 0 ? 0 : enemy.slowT > 0 ? enemy.slow : 1;
+      if (mult > 0) {
+        if (!enemy.flying && world.rubble.length && inRubble(enemy)) mult = Math.min(mult, RUBBLE_SLOW);
+        if (enemy.shellT > 0) mult *= SHELL_SPEED;
+        if (enemy.dashT > 0) mult *= DASH_MULT;
+        if (enemy.haste) mult *= HASTE_MULT;
+      }
+      enemy.vx = 0;
+      enemy.vy = 0;
+      advance(enemy, enemy.speed * mult * dt);
     }
 
     healPulse(dt);
@@ -1584,17 +2330,25 @@ export function createSim(): Sim {
     }
 
     for (const tower of world.towers) {
-      if (TOWERS[tower.kind].aura > 0) continue;
-      tower.cooldown -= dt;
       if (tower.recoil > 0) tower.recoil = Math.max(0, tower.recoil - dt * 3.2);
+      if (TOWERS[tower.kind].aura > 0) continue;
+      // заглушённая башня не стреляет и не копит выстрел
+      if (tower.silenceT > 0) {
+        tower.silenceT = Math.max(0, tower.silenceT - dt);
+        continue;
+      }
       const target = pickTargets(tower, 1)[0] ?? null;
+      if (!target) {
+        // без цели выстрелы не копятся: первая тварь получает один, а не очередь
+        tower.cooldown = Math.max(0, tower.cooldown - dt);
+        continue;
+      }
+      tower.cooldown -= dt;
       const cx = tower.col + 0.5;
       const cy = tower.row + 0.5;
-      if (target) {
-        const aim = Math.atan2(target.y - cy, target.x - cx);
-        tower.angle = dampAngle(tower.angle, aim, dt);
-        if (tower.cooldown <= 0) fire(tower, target);
-      }
+      const aim = Math.atan2(target.y - cy, target.x - cx);
+      tower.angle = dampAngle(tower.angle, aim, dt);
+      if (tower.cooldown <= 0) fire(tower, target);
     }
 
     for (const shot of world.shots) {
@@ -1659,6 +2413,10 @@ export function createSim(): Sim {
     }
     for (const item of world.bolts) item.life -= dt;
     if (world.bolts.some((item) => item.life <= 0)) world.bolts = world.bolts.filter((item) => item.life > 0);
+    for (const item of world.rubble) item.life -= dt;
+    if (world.rubble.some((item) => item.life <= 0)) world.rubble = world.rubble.filter((item) => item.life > 0);
+    for (const item of world.corpses) item.life -= dt;
+    if (world.corpses.some((item) => item.life <= 0)) world.corpses = world.corpses.filter((item) => item.life > 0);
     for (const item of world.rings) item.life -= dt;
     for (const item of world.decals) item.life -= dt;
     for (const item of world.flashes) item.life -= dt;
@@ -1682,12 +2440,13 @@ export function createSim(): Sim {
       return;
     }
     const def = TOWERS[build];
-    if (!canPay(def.cost)) {
+    const cost = price(def.cost);
+    if (!canPay(cost)) {
       sfx("deny");
       say("Не хватает золота");
       return;
     }
-    pay(def.cost);
+    pay(cost);
     const tower: Tower = {
       id: nextId++,
       kind: build,
@@ -1695,7 +2454,7 @@ export function createSim(): Sim {
       row,
       dmgRank: 0,
       rateRank: 0,
-      spent: def.cost,
+      spent: cost,
       cooldown: Math.random() * 0.25,
       target: "first",
       angle: -Math.PI / 2,
@@ -1704,6 +2463,7 @@ export function createSim(): Sim {
       spec: null,
       buff: NO_BUFF,
       range: def.range,
+      silenceT: 0,
     };
     world.towers.push(tower);
     occ.set(key, tower.id);
@@ -1838,6 +2598,13 @@ export function createSim(): Sim {
       abilityShown = Math.ceil(abilityCd);
       freezeCd = run.freezeCd ?? 0;
       freezeShown = Math.ceil(freezeCd);
+      stormCd = run.stormCd ?? 0;
+      stormShown = Math.ceil(stormCd);
+      rallyCd = run.rallyCd ?? 0;
+      rallyShown = Math.ceil(rallyCd);
+      rage = run.rage ?? 0;
+      rageShown = Math.floor(rage);
+      for (const id of run.perks ?? []) perks.add(id);
       bonus = run.bonus ?? NO_BONUS;
       for (const saved of run.towers) {
         const tower: Tower = {
@@ -1856,6 +2623,7 @@ export function createSim(): Sim {
           spec: saved.spec,
           buff: NO_BUFF,
           range: TOWERS[saved.kind].range,
+          silenceT: 0,
         };
         world.towers.push(tower);
         occ.set(`${tower.col},${tower.row}`, tower.id);
@@ -1865,6 +2633,7 @@ export function createSim(): Sim {
       prepLeft = null;
       banner = "Димон вернулся на стену";
       bannerT = 3;
+      if (run.perkDue) openPerks();
       persist();
       flush();
     },
@@ -1886,6 +2655,7 @@ export function createSim(): Sim {
       prepShown = PREP_SECONDS;
       banner = "Ночь не кончилась";
       bannerT = 3;
+      if (cleared % PERK_EVERY === 0) openPerks();
       saveRun();
       flush();
     },
@@ -1921,7 +2691,7 @@ export function createSim(): Sim {
         return;
       }
       const def = TOWERS[kind];
-      if (!canPay(def.cost)) {
+      if (!canPay(price(def.cost))) {
         sfx("deny");
         say("Не хватает золота");
         return;
@@ -1950,7 +2720,7 @@ export function createSim(): Sim {
       if (TOWERS[tower.kind].aura > 0) return;
       const rank = track === "dmg" ? tower.dmgRank : tower.rateRank;
       if (rank >= MAX_RANK) return;
-      const cost = upgradeCost(TOWERS[tower.kind].cost, rank);
+      const cost = price(upgradeCost(TOWERS[tower.kind].cost, rank));
       if (!canPay(cost)) {
         sfx("deny");
         say("Не хватает золота");
@@ -1975,7 +2745,7 @@ export function createSim(): Sim {
         say(`Мастерство откроется после ${specNeed(tower.kind)} улучшений`);
         return;
       }
-      const cost = specCost(tower.kind);
+      const cost = price(specCost(tower.kind));
       if (!canPay(cost)) {
         sfx("deny");
         say("Не хватает золота");
@@ -2022,6 +2792,64 @@ export function createSim(): Sim {
         return;
       }
       castFreeze();
+    },
+    storm() {
+      audio.unlock();
+      if (phase !== "combat") {
+        say("Гроза бьёт только в бою");
+        return;
+      }
+      if (paused) return;
+      if (stormCd > 0) {
+        sfx("deny");
+        say(`Гроза будет готова через ${Math.ceil(stormCd)} с`);
+        return;
+      }
+      castStorm();
+    },
+    rally() {
+      audio.unlock();
+      if (phase !== "combat") {
+        say("Набат звучит только в бою");
+        return;
+      }
+      if (paused) return;
+      if (rallyCd > 0) {
+        sfx("deny");
+        say(`Набат будет готов через ${Math.ceil(rallyCd)} с`);
+        return;
+      }
+      castRally();
+    },
+    wrath() {
+      audio.unlock();
+      if (phase !== "combat") {
+        say("Гнев Димона — только в бою");
+        return;
+      }
+      if (paused || world.wrathT > 0) return;
+      if (rage < WRATH_NEED) {
+        sfx("deny");
+        say(`Гнев копится: ${Math.floor(rage)} из ${WRATH_NEED}`);
+        return;
+      }
+      castWrath();
+    },
+    choosePerk(index) {
+      if (!perkOptions || phase !== "prep") return;
+      const id = perkOptions[index];
+      if (!id) return;
+      perks.add(id);
+      perkOptions = null;
+      if (id === "gates") lives += PERK_LIVES;
+      refreshTowers();
+      prepLeft = PREP_SECONDS;
+      prepShown = PREP_SECONDS;
+      sfx("perk");
+      banner = `${PERKS[id].name}: ${PERKS[id].blurb}`;
+      bannerT = 3;
+      saveRun();
+      flush();
     },
     chooseEvent(index) {
       if (!eventId || phase !== "prep") return;
@@ -2078,6 +2906,11 @@ export function createSim(): Sim {
     },
     callWave() {
       audio.unlock();
+      if (perkOptions) {
+        sfx("deny");
+        say("Сначала выбери дар");
+        return;
+      }
       if (eventId) {
         sfx("deny");
         say("Сначала реши, что делать на тропе");
@@ -2130,7 +2963,12 @@ export function createSim(): Sim {
         return;
       }
       const capped = Math.min(0.05, Math.max(0, realDt));
-      acc += capped * speed;
+      let scale = 1;
+      if (world.slowmo > 0) {
+        world.slowmo = Math.max(0, world.slowmo - capped);
+        scale = 0.35;
+      }
+      acc += capped * speed * scale;
       const step = 1 / 60;
       let guard = 0;
       while (acc >= step && guard < 12) {

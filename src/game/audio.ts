@@ -34,7 +34,16 @@ export type SfxName =
   | "win"
   | "lose"
   | "boom"
-  | "boss";
+  | "boss"
+  | "storm"
+  | "rally"
+  | "wrath"
+  | "roar"
+  | "silence"
+  | "blink"
+  | "dash"
+  | "perk"
+  | "shatter";
 
 export function createAudio(): Sfx {
   let ctx: AudioContext | null = null;
@@ -45,6 +54,9 @@ export function createAudio(): Sfx {
   let lastHit = 0;
   let lastBoom = 0;
   let lastHeal = 0;
+  let lastSilence = 0;
+  let lastDash = 0;
+  let lastShatter = 0;
   let lastShield = 0;
   let lastStun = 0;
   let noiseBuf: AudioBuffer | null = null;
@@ -304,6 +316,57 @@ export function createAudio(): Sfx {
     lose: () => {
       tone(220, 0.3, "sawtooth", 0.04, -80);
       tone(160, 0.45, "triangle", 0.04, -40, 0.12);
+    },
+    storm: () => {
+      noise(0.9, 0.07, 500);
+      tone(48, 0.9, "sawtooth", 0.05, -14);
+      tone(1800, 0.12, "sawtooth", 0.03, -1300, 0.05);
+    },
+    rally: () => {
+      // набат: два удара колокола с длинным хвостом
+      [0, 0.32].forEach((at) => {
+        tone(294, 0.9, "triangle", 0.06, -4, at);
+        tone(588, 0.7, "sine", 0.035, -6, at);
+        tone(881, 0.5, "sine", 0.02, -8, at);
+      });
+    },
+    wrath: () => {
+      noise(1.4, 0.08, 600);
+      tone(55, 1.6, "sawtooth", 0.06, 30);
+      [220, 277, 330, 440].forEach((f, i) => tone(f, 0.5, "square", 0.03, 40, 0.1 + i * 0.12));
+    },
+    roar: () => {
+      noise(0.8, 0.07, 350);
+      tone(70, 0.9, "sawtooth", 0.07, -28);
+      tone(105, 0.7, "square", 0.035, -40, 0.06);
+    },
+    silence: () => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      if (now - lastSilence < 150) return;
+      lastSilence = now;
+      tone(520, 0.3, "sine", 0.035, -360);
+      tone(260, 0.35, "triangle", 0.03, -180, 0.04);
+    },
+    blink: () => {
+      tone(900, 0.1, "sine", 0.03, 700);
+      tone(1500, 0.08, "triangle", 0.02, 300, 0.05);
+    },
+    dash: () => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      if (now - lastDash < 120) return;
+      lastDash = now;
+      noise(0.14, 0.03, 3200);
+      tone(300, 0.1, "sawtooth", 0.02, 260);
+    },
+    perk: () => {
+      [392, 494, 587, 784].forEach((f, i) => tone(f, 0.22, "triangle", 0.04, 0, i * 0.07));
+    },
+    shatter: () => {
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      if (now - lastShatter < 80) return;
+      lastShatter = now;
+      noise(0.18, 0.045, 7000);
+      tone(2100, 0.1, "triangle", 0.02, -900);
     },
   };
 
