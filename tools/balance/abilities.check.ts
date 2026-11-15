@@ -11,6 +11,7 @@ import {
   PERK_DISCOUNT,
   SILENCE_TIME,
   STORM_TARGETS,
+  SPECS,
   TOWERS,
   WRATH_NEED,
   eliteChance,
@@ -420,10 +421,11 @@ const TY = tr + 0.5;
   put(s, "ballista", 1, 0);
   put(s, "banner", 2, 0);
   const before = s.getSnapshot().maxAll;
-  ok("максимум: кнопка знает, сколько улучшений осталось", before.steps === 12, `${before.steps} шагов за ${before.cost}`);
+  ok("максимум: кнопка знает, сколько шагов осталось (12 рангов и 3 мастерства)", before.steps === 15, `${before.steps} шагов за ${before.cost}`);
   s.upgradeAll();
   const rows = s.world.towers.filter((t) => TOWERS[t.kind].aura === 0);
   ok("максимум: у стреляющих башен все ранги 3/3", rows.every((t) => t.dmgRank === 3 && t.rateRank === 3));
+  ok("максимум: у каждой башни, включая Знамя, выбрана ветка мастерства", s.world.towers.every((t) => t.spec !== null && SPECS[t.kind].some((d) => d.id === t.spec)));
   ok("максимум: после этого нечего прокачивать", s.getSnapshot().maxAll.steps === 0);
   const poor = createSim();
   poor.start();
@@ -433,7 +435,7 @@ const TY = tr + 0.5;
   poor.upgradeAll();
   const hud = poor.getSnapshot();
   const t = poor.world.towers[0]!;
-  ok("максимум: без чита покупает, пока хватает золота", g0 - hud.gold > 0 && hud.gold >= 0 && t.dmgRank + t.rateRank > 0, `золото ${g0} → ${hud.gold}, ранги ${t.dmgRank}+${t.rateRank}`);
+  ok("максимум: без чита покупает, пока хватает золота и не уходит в минус", g0 - hud.gold > 0 && hud.gold >= 0 && t.dmgRank + t.rateRank > 0, `золото ${g0} → ${hud.gold}, ранги ${t.dmgRank}+${t.rateRank}`);
 }
 
 console.log(bad ? `\nОШИБОК: ${bad}` : "\nвсе проверки обновления прошли");

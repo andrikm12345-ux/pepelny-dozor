@@ -501,8 +501,8 @@ function AbilityBar({ hud, sim }: { hud: Hud; sim: Sim }) {
       <button
         type="button"
         data-testid="max-all"
-        aria-label={`Всё на максимум: ${hud.maxAll.steps} улучшений за ${hud.maxAll.cost} золота`}
-        title={`Прокачать все башни на поле на максимум (${hud.maxAll.steps} улучшений, ${hud.maxAll.cost} золота)`}
+        aria-label={`Всё на максимум и случайное мастерство: ${hud.maxAll.steps} шагов за ${hud.maxAll.cost} золота`}
+        title={`Прокачать все башни на максимум и выбрать каждой случайное мастерство (${hud.maxAll.steps} шагов, ${hud.maxAll.cost} золота)`}
         disabled={hud.maxAll.steps === 0}
         onClick={sim.upgradeAll}
         className="mt-1 flex w-12 shrink-0 flex-col items-center gap-0.5 disabled:opacity-40 sm:w-14"

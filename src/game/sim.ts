@@ -783,9 +783,18 @@ export function createSim(): Sim {
     return steps.sort((a, b) => a.cost - b.cost);
   }
 
+  /** Башни, которым ещё предстоит выбрать ветку мастерства (даже если ранги пока не добраны). */
+  function specCandidates() {
+    return world.towers.filter((tower) => !tower.spec);
+  }
+
   function maxAllPlan() {
     const steps = upgradeSteps();
-    return { steps: steps.length, cost: steps.reduce((sum, step) => sum + step.cost, 0) };
+    const specs = specCandidates();
+    return {
+      steps: steps.length + specs.length,
+      cost: steps.reduce((sum, step) => sum + step.cost, 0) + specs.reduce((sum, tower) => sum + price(specCost(tower.kind)), 0),
+    };
   }
 
   function perkView(): PerkView | null {
@@ -3000,12 +3009,13 @@ export function createSim(): Sim {
       audio.unlock();
       if (phase === "menu" || phase === "victory" || phase === "defeat") return;
       const steps = upgradeSteps();
-      if (!steps.length) {
+      if (!steps.length && !specCandidates().length) {
         sfx("deny");
         say(world.towers.length ? "Всё уже на максимуме" : "Прокачивать нечего: на поле нет башен");
         return;
       }
       let done = 0;
+      let picked = 0;
       for (const step of steps) {
         if (!canPay(step.cost)) continue;
         // дешёвые шаги идут первыми, но ранги одной башни должны покупаться по порядку: цену считаем заново
@@ -3019,20 +3029,34 @@ export function createSim(): Sim {
         else step.tower.rateRank++;
         done++;
       }
+      // мастерство: каждой башне, у которой ранги уже на максимуме, достаётся случайная ветка
+      for (const tower of specCandidates()) {
+        if (tower.dmgRank + tower.rateRank < specNeed(tower.kind)) continue;
+        const cost = price(specCost(tower.kind));
+        if (!canPay(cost)) continue;
+        const pair = SPECS[tower.kind];
+        const choice = pair[Math.floor(Math.random() * pair.length)]!;
+        pay(cost);
+        tower.spent += cost;
+        tower.spec = choice.id;
+        picked++;
+        addFlash(tower.col + 0.5, tower.row + 0.5, 2.2, choice.color, 0.45);
+        pillar(tower.col + 0.5, tower.row + 0.5, choice.color, 18);
+      }
       refreshTowers();
       for (const tower of world.towers) {
         if (TOWERS[tower.kind].aura > 0) continue;
         addRing(tower.col + 0.5, tower.row + 0.5, 0.2, 0.9, "#e2b15a", 0.5);
         pillar(tower.col + 0.5, tower.row + 0.5, "#ffd98a", 10);
       }
-      const left = upgradeSteps().length;
-      if (done) sfx("upgrade");
+      const left = upgradeSteps().length + specCandidates().length;
+      if (done || picked) sfx(picked ? "spec" : "upgrade");
       else sfx("deny");
-      banner = !done
+      banner = !done && !picked
         ? "Не хватает золота даже на одно улучшение"
         : left
-          ? `Прокачано улучшений: ${done}. Не хватило золота ещё на ${left}`
-          : `Всё на максимуме (${done} улучшений)`;
+          ? `Прокачано: ${done} улучшений, мастерство у ${picked} башен. Не хватило золота ещё на ${left}`
+          : `Всё на максимуме: ${done} улучшений, мастерство у ${picked} башен`;
       bannerT = 2.6;
       saveRun();
       flush();
