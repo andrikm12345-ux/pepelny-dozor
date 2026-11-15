@@ -122,6 +122,28 @@ export function createRenderer(): Renderer {
   const shownHp = new WeakMap<Creep, number>();
   let lastAnim = -1;
   let cracks: HTMLCanvasElement | null = null;
+  /** Зерно камня: плитка шума 128×128, которая кладётся поверх плит как текстура. */
+  let grain: HTMLCanvasElement | null = null;
+  function grainTile() {
+    if (grain) return grain;
+    grain = makeCanvas(128, 128);
+    const g = grain.getContext("2d")!;
+    const img = g.createImageData(128, 128);
+    for (let i = 0; i < 128 * 128; i++) {
+      // шум в два масштаба: мелкая крупа и редкие тёмные пятна
+      const x = i % 128;
+      const y = (i / 128) | 0;
+      const fine = hash(x, y, 120);
+      const coarse = hash(x >> 3, y >> 3, 121);
+      const v = Math.floor(70 + fine * 120 + coarse * 50);
+      img.data[i * 4] = v;
+      img.data[i * 4 + 1] = v;
+      img.data[i * 4 + 2] = v - 6;
+      img.data[i * 4 + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    return grain;
+  }
   let torches: Pt[] = [];
 
   const motes: Mote[] = Array.from({ length: 48 }, (_, i) => {
@@ -331,6 +353,35 @@ export function createRenderer(): Renderer {
         }
       }
     }
+
+    // зерно камня: крупа и пятна поверх всех плит, края поля темнее
+    g.save();
+    round(g, ox - cell * 0.12, oy - cell * 0.12, cell * COLS + cell * 0.24, cell * ROWS + cell * 0.24, cell * 0.3);
+    g.clip();
+    const pat = g.createPattern(grainTile(), "repeat");
+    if (pat) {
+      g.globalCompositeOperation = "overlay";
+      g.globalAlpha = 0.55;
+      g.fillStyle = pat;
+      g.fillRect(ox, oy, cell * COLS, cell * ROWS);
+    }
+    g.globalCompositeOperation = "source-over";
+    g.globalAlpha = 1;
+    // мох в стыках: тёмно-зелёные пятна вдоль нижних кромок плит
+    for (let i = 0; i < 70; i++) {
+      const col = Math.floor(hash(i, 1, 130) * COLS);
+      const row = Math.floor(hash(i, 2, 131) * ROWS);
+      if (isRoad(map, col, row)) continue;
+      const mx = ox + (col + 0.15 + hash(i, 3, 132) * 0.7) * cell;
+      const my = oy + (row + 0.88) * cell;
+      const mr = cell * (0.12 + hash(i, 4, 133) * 0.16);
+      const grad = g.createRadialGradient(mx, my, 0, mx, my, mr);
+      grad.addColorStop(0, "rgba(86, 128, 76, 0.34)");
+      grad.addColorStop(1, "rgba(86, 128, 76, 0)");
+      g.fillStyle = grad;
+      g.fillRect(mx - mr, my - mr, mr * 2, mr * 2);
+    }
+    g.restore();
 
     // слоями по всем тропам сразу, чтобы место слияния не перечёркивало само себя
     const ribbons = map.routes.map((points) => pathRibbon(board, points));
@@ -557,6 +608,23 @@ export function createRenderer(): Renderer {
       }
     }
     ctx.globalAlpha = 1;
+
+    // тени облаков медленно плывут по полю
+    if (!reduceMotion) {
+      ctx.globalCompositeOperation = "multiply";
+      for (let i = 0; i < 3; i++) {
+        const t = (world.anim * (0.012 + i * 0.004) + i * 0.37) % 1.4;
+        const cx0 = (t - 0.2) * width;
+        const cy0 = height * (0.25 + i * 0.28) + Math.sin(world.anim * 0.1 + i) * height * 0.05;
+        const r0 = Math.max(width, height) * (0.28 + i * 0.06);
+        const grad = ctx.createRadialGradient(cx0, cy0, 0, cx0, cy0, r0);
+        grad.addColorStop(0, "rgba(120, 125, 135, 0.34)");
+        grad.addColorStop(1, "rgba(255, 255, 255, 1)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(cx0 - r0, cy0 - r0, r0 * 2, r0 * 2);
+      }
+      ctx.globalCompositeOperation = "source-over";
+    }
 
     // тлеющие трещины: готовый слой, который дышит
     if (cracks) {
